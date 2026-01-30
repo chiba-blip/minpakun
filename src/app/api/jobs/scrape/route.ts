@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
+import { getConnectors } from '@/lib/scraper/connectors';
+import type { SearchParams, NormalizedListing } from '@/lib/scraper/types';
+import { throttle } from '@/lib/scraper/http';
 
 /**
- * 開発環境用のスクレイピングジョブ
- * 本番環境ではNetlify Scheduled Functionsを使用
+ * スクレイピングジョブ
+ * 全ポータルサイトから物件を取得
  */
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServer();
@@ -11,8 +14,10 @@ export async function POST(request: NextRequest) {
   const results = {
     processed: 0,
     inserted: 0,
+    skipped: 0,
     errors: [] as string[],
     message: '',
+    details: {} as Record<string, { candidates: number; inserted: number }>,
   };
 
   try {
@@ -44,63 +49,85 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(results);
     }
 
-    // 3. デモデータを挿入（実際のスクレイピングの代わり）
-    // ※実際のスクレイピングは利用規約の確認が必要なため、デモデータを使用
-    const demoProperties = generateDemoProperties(configs.areas, configs.property_types);
+    const searchParams: SearchParams = {
+      areas: configs.areas || [],
+      propertyTypes: configs.property_types || [],
+      maxPages: 30, // 全ページ取得
+    };
 
-    for (const demo of demoProperties) {
-      results.processed++;
+    console.log('Search params:', searchParams);
+    console.log('Enabled sites:', sites.map(s => s.key));
+
+    // 3. 各サイトのConnectorで検索・取得
+    const enabledKeys = sites.map(s => s.key);
+    const connectors = getConnectors(enabledKeys);
+
+    console.log('Active connectors:', connectors.map(c => c.key));
+
+    for (const connector of connectors) {
+      const site = sites.find(s => s.key === connector.key);
+      if (!site) continue;
+
+      console.log(`\n=== Processing site: ${connector.name} (${connector.key}) ===`);
+      results.details[connector.key] = { candidates: 0, inserted: 0 };
 
       try {
-        // 物件を作成
-        const { data: property, error: propError } = await supabase
-          .from('properties')
-          .insert({
-            normalized_address: demo.address,
-            city: demo.city,
-            address_raw: demo.address,
-            building_area: demo.building_area,
-            land_area: demo.land_area,
-            built_year: demo.built_year,
-            rooms: demo.rooms,
-            property_type: demo.property_type,
-          })
-          .select('id')
-          .single();
+        // 検索実行（全ページ取得）
+        const candidates = await connector.search(searchParams);
+        results.details[connector.key].candidates = candidates.length;
+        console.log(`Found ${candidates.length} candidates from ${connector.name}`);
 
-        if (propError) {
-          results.errors.push(`物件作成失敗: ${propError.message}`);
-          continue;
-        }
+        // 各候補の詳細を取得（1サイトあたり最大200件に制限）
+        const maxDetailsPerSite = 200;
+        const candidatesToProcess = candidates.slice(0, maxDetailsPerSite);
 
-        // 最初の有効なサイトでリスティングを作成
-        const siteId = sites[0].id;
-        const { error: listingError } = await supabase
-          .from('listings')
-          .insert({
-            portal_site_id: siteId,
-            property_id: property.id,
-            url: demo.url,
-            title: demo.title,
-            price: demo.price,
-            external_id: demo.external_id,
-            raw: { demo: true },
-          });
+        for (const candidate of candidatesToProcess) {
+          results.processed++;
 
-        if (listingError) {
-          if (!listingError.message.includes('duplicate')) {
-            results.errors.push(`リスティング作成失敗: ${listingError.message}`);
+          try {
+            // 既存チェック（URL重複）
+            const { data: existing } = await supabase
+              .from('listings')
+              .select('id')
+              .eq('url', candidate.url)
+              .single();
+
+            if (existing) {
+              results.skipped++;
+              continue;
+            }
+
+            // 詳細取得
+            const detail = await connector.fetchDetail(candidate.url);
+            const normalized = connector.normalize(detail);
+
+            // DB保存
+            await saveListing(supabase, site.id, normalized);
+            results.inserted++;
+            results.details[connector.key].inserted++;
+
+            await throttle(500);
+          } catch (error) {
+            const msg = `Error processing ${candidate.url}: ${error}`;
+            console.error(msg);
+            results.errors.push(msg);
           }
-          continue;
         }
 
-        results.inserted++;
+        if (candidates.length > maxDetailsPerSite) {
+          console.log(`Note: Processed ${maxDetailsPerSite} of ${candidates.length} candidates`);
+        }
       } catch (error) {
-        results.errors.push(`エラー: ${error}`);
+        const msg = `Error searching ${connector.key}: ${error}`;
+        console.error(msg);
+        results.errors.push(msg);
       }
     }
 
-    results.message = `${results.inserted}件の物件を取得しました`;
+    results.message = `${results.inserted}件の新規物件を取得しました（${results.skipped}件はスキップ）`;
+    console.log('\n=== Scrape completed ===');
+    console.log(results);
+
     return NextResponse.json(results);
   } catch (error) {
     console.error('Scrape job failed:', error);
@@ -112,47 +139,69 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * デモ用の物件データを生成
+ * リスティングをDBに保存
  */
-function generateDemoProperties(areas: string[], propertyTypes: string[]) {
-  const properties = [];
-  const now = Date.now();
+async function saveListing(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  portalSiteId: string,
+  listing: NormalizedListing
+) {
+  // 1. property を検索 or 作成
+  let propertyId: string;
 
-  // 各エリア×物件タイプで1〜3件生成
-  for (const area of areas) {
-    for (const type of propertyTypes) {
-      const count = Math.floor(Math.random() * 3) + 1;
-      
-      for (let i = 0; i < count; i++) {
-        const isApartment = type.includes('集合');
-        const price = isApartment 
-          ? Math.floor(Math.random() * 50000000) + 30000000  // 3000万〜8000万
-          : Math.floor(Math.random() * 20000000) + 5000000;   // 500万〜2500万
-        
-        const buildingArea = isApartment
-          ? Math.floor(Math.random() * 300) + 200  // 200〜500㎡
-          : Math.floor(Math.random() * 100) + 80;   // 80〜180㎡
+  // 既存の物件を住所で検索
+  const { data: existingProperty } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('normalized_address', listing.property.normalized_address)
+    .single();
 
-        const rooms = isApartment
-          ? Math.floor(Math.random() * 8) + 4  // 4〜12戸
-          : 1;
+  if (existingProperty) {
+    propertyId = existingProperty.id;
+  } else {
+    // 新規作成
+    const { data: newProperty, error: propError } = await supabase
+      .from('properties')
+      .insert({
+        normalized_address: listing.property.normalized_address,
+        city: listing.property.city,
+        address_raw: listing.property.address_raw,
+        building_area: listing.property.building_area,
+        land_area: listing.property.land_area,
+        built_year: listing.property.built_year,
+        rooms: listing.property.rooms,
+        property_type: listing.property.property_type,
+      })
+      .select('id')
+      .single();
 
-        properties.push({
-          title: `${area}の${type}物件 ${i + 1}`,
-          address: `北海道${area}${Math.floor(Math.random() * 10) + 1}条${Math.floor(Math.random() * 20) + 1}丁目`,
-          city: area.includes('札幌市') ? area : area,
-          price,
-          building_area: buildingArea,
-          land_area: buildingArea * (Math.random() * 0.5 + 1),
-          built_year: 2024 - Math.floor(Math.random() * 40),
-          rooms,
-          property_type: type,
-          url: `https://example.com/property/${now}-${area}-${i}`,
-          external_id: `demo-${now}-${area}-${i}`,
-        });
-      }
+    if (propError || !newProperty) {
+      throw new Error(`Failed to insert property: ${propError?.message}`);
+    }
+
+    propertyId = newProperty.id;
+  }
+
+  // 2. listing を作成
+  const { error: listingError } = await supabase
+    .from('listings')
+    .insert({
+      portal_site_id: portalSiteId,
+      property_id: propertyId,
+      url: listing.url,
+      title: listing.title,
+      price: listing.price,
+      external_id: listing.external_id,
+      raw: listing.raw,
+    });
+
+  if (listingError) {
+    // 重複エラーは無視
+    if (!listingError.message.includes('duplicate')) {
+      throw new Error(`Failed to insert listing: ${listingError.message}`);
     }
   }
 
-  return properties;
+  console.log(`Saved: ${listing.title?.substring(0, 30)}...`);
 }
