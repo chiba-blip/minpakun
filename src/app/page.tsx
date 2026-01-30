@@ -20,6 +20,17 @@ interface DashboardStats {
   lastScrapeAt: string | null;
 }
 
+// スクレイプ対象サイト
+const SCRAPE_SITES = [
+  { key: 'athome', name: 'アットホーム' },
+  { key: 'suumo', name: 'SUUMO' },
+  { key: 'homes', name: "HOME'S" },
+  { key: 'kenbiya', name: '健美家' },
+  { key: 'rakumachi', name: '楽待' },
+  { key: 'rengotai', name: '北海道不動産連合隊' },
+  { key: 'housedo', name: 'ハウスドゥ' },
+];
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,7 +54,7 @@ export default function DashboardPage() {
     }
   }
 
-  async function triggerJob(job: 'scrape' | 'simulate' | 'notify') {
+  async function triggerJob(job: 'simulate' | 'notify') {
     setTriggering(job);
     try {
       const res = await fetch(`/api/jobs/${job}`, {
@@ -55,11 +66,33 @@ export default function DashboardPage() {
         alert(result.message);
       }
       
-      // 完了後に統計を再取得
       await fetchStats();
     } catch (error) {
       console.error(`Failed to trigger ${job}:`, error);
       alert(`${job}の実行に失敗しました`);
+    } finally {
+      setTriggering(null);
+    }
+  }
+
+  async function scrapeFromSite(siteKey: string, siteName: string) {
+    setTriggering(`scrape-${siteKey}`);
+    try {
+      const res = await fetch(`/api/jobs/scrape?site=${siteKey}`, {
+        method: 'POST',
+      });
+      const result = await res.json();
+      
+      if (result.message) {
+        alert(result.message);
+      } else if (result.error) {
+        alert(`${siteName}の取得に失敗: ${result.error}`);
+      }
+      
+      await fetchStats();
+    } catch (error) {
+      console.error(`Failed to scrape ${siteKey}:`, error);
+      alert(`${siteName}の取得に失敗しました`);
     } finally {
       setTriggering(null);
     }
@@ -163,29 +196,43 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 手動実行ボタン */}
+      {/* スクレイプ（サイト別） */}
       <Card>
         <CardHeader>
-          <CardTitle>手動実行</CardTitle>
+          <CardTitle>スクレイプ（サイト別）</CardTitle>
           <CardDescription>
-            各ジョブを手動で実行します（通常は自動実行されます）
+            各サイトから5件ずつ物件を取得します（タイムアウト対策のため少量ずつ）
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-4">
-            <Button
-              onClick={() => triggerJob('scrape')}
-              disabled={!!triggering}
-              variant="outline"
-            >
-              {triggering === 'scrape' ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Play className="w-4 h-4 mr-2" />
-              )}
-              スクレイプ実行
-            </Button>
+          <div className="flex flex-wrap gap-2">
+            {SCRAPE_SITES.map((site) => (
+              <Button
+                key={site.key}
+                onClick={() => scrapeFromSite(site.key, site.name)}
+                disabled={!!triggering}
+                variant="outline"
+                size="sm"
+              >
+                {triggering === `scrape-${site.key}` ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 mr-2" />
+                )}
+                {site.name}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
+      {/* その他の操作 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>その他の操作</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
             <Button
               onClick={() => triggerJob('simulate')}
               disabled={!!triggering}

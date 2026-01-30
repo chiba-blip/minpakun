@@ -1,138 +1,105 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
-import { getConnectors } from '@/lib/scraper/connectors';
+import { getConnector } from '@/lib/scraper/connectors';
 import type { SearchParams, NormalizedListing } from '@/lib/scraper/types';
 import { throttle } from '@/lib/scraper/http';
 
+// Netlifyタイムアウト対策: 1サイト1ページ5件のみ処理
+const MAX_PAGES = 1;
+const MAX_DETAILS = 5;
+
 /**
- * スクレイピングジョブ
- * 全ポータルサイトから物件を取得
+ * スクレイピングジョブ（タイムアウト対策版）
+ * クエリパラメータでサイトを指定: ?site=athome
  */
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServer();
+  const { searchParams } = new URL(request.url);
+  const targetSite = searchParams.get('site') || 'athome'; // デフォルトはアットホーム
 
   const results = {
+    site: targetSite,
     processed: 0,
     inserted: 0,
     skipped: 0,
     errors: [] as string[],
     message: '',
-    details: {} as Record<string, { candidates: number; inserted: number }>,
   };
 
   try {
-    // 1. 有効なポータルサイトを取得
-    const { data: sites, error: sitesError } = await supabase
+    // 1. 対象ポータルサイトを取得
+    const { data: site, error: siteError } = await supabase
       .from('portal_sites')
       .select('*')
-      .eq('enabled', true);
-
-    if (sitesError) {
-      throw new Error(`Failed to fetch portal_sites: ${sitesError.message}`);
-    }
-
-    if (!sites || sites.length === 0) {
-      results.message = '有効なポータルサイトがありません。設定 → ポータルサイトで有効にしてください。';
-      return NextResponse.json(results);
-    }
-
-    // 2. スクレイプ設定を取得
-    const { data: configs, error: configError } = await supabase
-      .from('scrape_configs')
-      .select('*')
+      .eq('key', targetSite)
       .eq('enabled', true)
-      .limit(1)
       .single();
 
-    if (configError || !configs) {
-      results.message = 'スクレイプ条件が設定されていません。設定 → スクレイプ条件で設定してください。';
+    if (siteError || !site) {
+      results.message = `ポータルサイト「${targetSite}」が見つからないか無効です`;
       return NextResponse.json(results);
     }
 
-    const searchParams: SearchParams = {
-      areas: configs.areas || [],
-      propertyTypes: configs.property_types || [],
-      maxPages: 5, // タイムアウト対策で5ページに制限
+    // 2. Connector取得
+    const connector = getConnector(targetSite);
+    if (!connector) {
+      results.message = `コネクタ「${targetSite}」が見つかりません`;
+      return NextResponse.json(results);
+    }
+
+    console.log(`[scrape] Starting: ${connector.name} (${targetSite})`);
+
+    // 3. 検索実行（1ページのみ）
+    const searchConfig: SearchParams = {
+      areas: [],
+      propertyTypes: [],
+      maxPages: MAX_PAGES,
     };
 
-    console.log('Search params:', searchParams);
-    console.log('Enabled sites:', sites.map(s => s.key));
+    const candidates = await connector.search(searchConfig);
+    console.log(`[scrape] Found ${candidates.length} candidates`);
 
-    // 3. 各サイトのConnectorで検索・取得
-    const enabledKeys = sites.map(s => s.key);
-    const connectors = getConnectors(enabledKeys);
+    // 4. 詳細取得（5件のみ）
+    const candidatesToProcess = candidates.slice(0, MAX_DETAILS);
 
-    console.log('Active connectors:', connectors.map(c => c.key));
-
-    for (const connector of connectors) {
-      const site = sites.find(s => s.key === connector.key);
-      if (!site) continue;
-
-      console.log(`\n=== Processing site: ${connector.name} (${connector.key}) ===`);
-      results.details[connector.key] = { candidates: 0, inserted: 0 };
-
+    for (const candidate of candidatesToProcess) {
+      results.processed++;
       try {
-        // 検索実行（全ページ取得）
-        const candidates = await connector.search(searchParams);
-        results.details[connector.key].candidates = candidates.length;
-        console.log(`Found ${candidates.length} candidates from ${connector.name}`);
+        // 既存チェック
+        const { data: existing } = await supabase
+          .from('listings')
+          .select('id')
+          .eq('url', candidate.url)
+          .single();
 
-        // 各候補の詳細を取得（タイムアウト対策で50件に制限）
-        const maxDetailsPerSite = 50;
-        const candidatesToProcess = candidates.slice(0, maxDetailsPerSite);
-
-        for (const candidate of candidatesToProcess) {
-          results.processed++;
-
-          try {
-            // 既存チェック（URL重複）
-            const { data: existing } = await supabase
-              .from('listings')
-              .select('id')
-              .eq('url', candidate.url)
-              .single();
-
-            if (existing) {
-              results.skipped++;
-              continue;
-            }
-
-            // 詳細取得
-            const detail = await connector.fetchDetail(candidate.url);
-            const normalized = connector.normalize(detail);
-
-            // DB保存
-            await saveListing(supabase, site.id, normalized);
-            results.inserted++;
-            results.details[connector.key].inserted++;
-
-            await throttle(500);
-          } catch (error) {
-            const msg = `Error processing ${candidate.url}: ${error}`;
-            console.error(msg);
-            results.errors.push(msg);
-          }
+        if (existing) {
+          results.skipped++;
+          console.log(`[scrape] Skip (exists): ${candidate.url}`);
+          continue;
         }
 
-        if (candidates.length > maxDetailsPerSite) {
-          console.log(`Note: Processed ${maxDetailsPerSite} of ${candidates.length} candidates`);
-        }
+        // 詳細取得 & 保存
+        const detail = await connector.fetchDetail(candidate.url);
+        const normalized = connector.normalize(detail);
+        await saveListing(supabase, site.id, normalized);
+        results.inserted++;
+        console.log(`[scrape] Inserted: ${normalized.title?.substring(0, 30)}...`);
+
+        await throttle(300);
       } catch (error) {
-        const msg = `Error searching ${connector.key}: ${error}`;
-        console.error(msg);
-        results.errors.push(msg);
+        results.errors.push(String(error));
+        console.error(`[scrape] Error: ${candidate.url}`, error);
       }
     }
 
-    results.message = `${results.inserted}件の新規物件を取得しました（${results.skipped}件はスキップ）`;
-    console.log('\n=== Scrape completed ===');
-    console.log(results);
+    results.message = `${connector.name}: ${results.inserted}件取得、${results.skipped}件スキップ（候補${candidates.length}件中${candidatesToProcess.length}件処理）`;
+    console.log(`[scrape] Done: ${results.message}`);
 
     return NextResponse.json(results);
   } catch (error) {
-    console.error('Scrape job failed:', error);
+    console.error('[scrape] Failed:', error);
     return NextResponse.json(
-      { error: String(error), ...results },
+      { ...results, error: String(error) },
       { status: 500 }
     );
   }
