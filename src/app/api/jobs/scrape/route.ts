@@ -65,12 +65,14 @@ export async function POST(request: NextRequest) {
     for (const candidate of candidatesToProcess) {
       results.processed++;
       try {
-        // 既存チェック
-        const { data: existing } = await supabase
+        // 既存チェック（maybeSingleを使用 - 0件でもエラーにならない）
+        const { data: existing, error: checkError } = await supabase
           .from('listings')
           .select('id')
           .eq('url', candidate.url)
-          .single();
+          .maybeSingle();
+
+        console.log(`[scrape] Check URL: ${candidate.url}, existing: ${!!existing}, error: ${checkError?.message || 'none'}`);
 
         if (existing) {
           results.skipped++;
@@ -79,6 +81,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 詳細取得 & 保存
+        console.log(`[scrape] Fetching detail: ${candidate.url}`);
         const detail = await connector.fetchDetail(candidate.url);
         const normalized = connector.normalize(detail);
         await saveListing(supabase, site.id, normalized);
