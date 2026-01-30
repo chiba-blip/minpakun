@@ -1,8 +1,11 @@
 /**
  * 楽待（Rakumachi）Connector
- * https://www.rakumachi.com/
+ * https://www.rakumachi.jp/
  * 
- * 注意: スクレイピングは利用規約を確認の上、低頻度で実行すること
+ * URL構造:
+ * - 収益物件一覧: /syuuekibukken/area/prefecture/dimAll/
+ * - 北海道(dim=1): /?pref=1
+ * - 物件タイプ: dim[]=1001(区分マンション), dim[]=1002(一棟アパート), dim[]=1003(一棟マンション), dim[]=1004(戸建賃貸)
  */
 import type { 
   Connector, 
@@ -15,42 +18,59 @@ import { fetchHtml, throttle } from '../http';
 import { logInfo, logError } from '../log';
 import { normalizeAddress, extractCity } from '../normalize/address';
 
-// 楽待は地域コードが異なる可能性があるため、実際のサイトを確認して調整
-const AREA_CODES: Record<string, string> = {
-  '札幌市': 'sapporo',
-  '小樽市': 'otaru',
-  '余市町': 'yoichi',
-  'ニセコ町': 'niseko',
-  '倶知安町': 'kutchan',
-};
+// 北海道の都道府県コード
+const HOKKAIDO_PREF_ID = '1';
 
-const PROPERTY_TYPE_CODES: Record<string, string> = {
-  '中古戸建て': 'house',
-  '一棟集合住宅': 'mansion',
+// 物件タイプコード（楽待のdimパラメータ）
+const PROPERTY_TYPE_DIMS: Record<string, string> = {
+  '一戸建て': '1004',     // 戸建賃貸
+  'マンション': '1001',   // 区分マンション
+  'アパート': '1002',      // 一棟アパート
+  '一棟マンション': '1003', // 一棟マンション
+  '別荘': '1004',         // 戸建として扱う
 };
 
 export class RakumachiConnector implements Connector {
   readonly key = 'rakumachi';
   readonly name = '楽待';
 
-  private baseUrl = 'https://www.rakumachi.com';
+  private baseUrl = 'https://www.rakumachi.jp';
 
   /**
    * 検索URLを構築
    */
   private buildSearchUrl(params: SearchParams, page: number = 1): string {
-    // 楽待の検索URL構造（実際のサイト構造に合わせて調整が必要）
-    const areaParam = params.areas
-      .map(a => AREA_CODES[a])
-      .filter(Boolean)
-      .join('+');
-
-    const typeParam = params.propertyTypes
-      .map(t => PROPERTY_TYPE_CODES[t])
-      .filter(Boolean)[0] || 'house';
-
-    // 北海道地域の検索
-    return `${this.baseUrl}/syuuekibukken/area/hokkaido/${areaParam}/?type=${typeParam}&page=${page}`;
+    const searchParams = new URLSearchParams();
+    
+    // 北海道を指定
+    searchParams.set('pref', HOKKAIDO_PREF_ID);
+    
+    // 物件タイプを指定
+    const dims = params.propertyTypes
+      .map(t => PROPERTY_TYPE_DIMS[t])
+      .filter(Boolean);
+    
+    if (dims.length > 0) {
+      dims.forEach(dim => {
+        searchParams.append('dim[]', dim);
+      });
+    }
+    
+    // ページ指定
+    if (page > 1) {
+      searchParams.set('page', String(page));
+    }
+    
+    // 価格上限（5000万円）
+    if (params.maxPrice) {
+      searchParams.set('price_to', String(Math.floor(params.maxPrice / 10000)));
+    }
+    
+    // 新着順
+    searchParams.set('sort', 'property_created_at');
+    searchParams.set('sort_type', 'desc');
+    
+    return `${this.baseUrl}/syuuekibukken/area/prefecture/dimAll/?${searchParams.toString()}`;
   }
 
   /**
@@ -58,9 +78,12 @@ export class RakumachiConnector implements Connector {
    */
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 5;
+    const maxPages = params.maxPages || 3;
 
-    logInfo(`[${this.key}] Starting search`, { areas: params.areas, types: params.propertyTypes });
+    logInfo(`[${this.key}] Starting search`, { 
+      areas: params.areas, 
+      types: params.propertyTypes 
+    });
 
     for (let page = 1; page <= maxPages; page++) {
       try {
@@ -83,8 +106,13 @@ export class RakumachiConnector implements Connector {
       }
     }
 
-    logInfo(`[${this.key}] Search complete`, { count: candidates.length });
-    return candidates;
+    // 重複除去
+    const uniqueCandidates = candidates.filter((c, i, arr) => 
+      arr.findIndex(x => x.url === c.url) === i
+    );
+
+    logInfo(`[${this.key}] Search complete`, { count: uniqueCandidates.length });
+    return uniqueCandidates;
   }
 
   /**
@@ -93,17 +121,30 @@ export class RakumachiConnector implements Connector {
   private parseSearchResults(html: string): ListingCandidate[] {
     const results: ListingCandidate[] = [];
 
-    // 物件リンクを抽出（実際のHTML構造に合わせて調整）
-    const propertyPattern = /<a[^>]*href="(\/syuuekibukken\/[^"]+)"[^>]*>/gi;
+    // 楽待の物件詳細リンクパターン
+    // /syuuekibukken/hokkaido/dim1004/xxxxxxx/show.html 形式
+    const propertyPattern = /href="(\/syuuekibukken\/[^"]*\/\d+\/show\.html)"/gi;
     const matches = html.matchAll(propertyPattern);
 
     for (const match of matches) {
       const relativeUrl = match[1];
-      // 詳細ページへのリンクのみ抽出
-      if (relativeUrl && relativeUrl.includes('/detail/') && !results.some(r => r.url.includes(relativeUrl))) {
-        results.push({
-          url: `${this.baseUrl}${relativeUrl}`,
-        });
+      const fullUrl = `${this.baseUrl}${relativeUrl}`;
+      
+      if (!results.some(r => r.url === fullUrl)) {
+        results.push({ url: fullUrl });
+      }
+    }
+
+    // 別パターン: /syuuekibukken/.../detail/xxxxx 形式
+    const altPattern = /href="(\/syuuekibukken\/[^"]*detail[^"]*)"/gi;
+    const altMatches = html.matchAll(altPattern);
+
+    for (const match of altMatches) {
+      const relativeUrl = match[1];
+      const fullUrl = `${this.baseUrl}${relativeUrl}`;
+      
+      if (!results.some(r => r.url === fullUrl)) {
+        results.push({ url: fullUrl });
       }
     }
 
@@ -123,13 +164,13 @@ export class RakumachiConnector implements Connector {
       title: this.extractTitle(html),
       price: this.extractPrice(html),
       address_raw: this.extractAddress(html),
-      building_area: this.extractNumber(html, /建物面積[：:]*\s*([\d.]+)\s*[㎡m²]/),
-      land_area: this.extractNumber(html, /土地面積[：:]*\s*([\d.]+)\s*[㎡m²]/),
+      building_area: this.extractBuildingArea(html),
+      land_area: this.extractLandArea(html),
       built_year: this.extractBuiltYear(html),
       rooms: this.extractRooms(html),
       property_type: this.extractPropertyType(html),
       external_id: this.extractExternalId(url),
-      raw: { html: html.substring(0, 50000) },
+      raw: { url, scraped_at: new Date().toISOString() },
     };
 
     await throttle(1500);
@@ -164,56 +205,138 @@ export class RakumachiConnector implements Connector {
 
   // ヘルパーメソッド
   private extractTitle(html: string): string {
-    const match = html.match(/<h1[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)<\/h1>/i) 
-                || html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-    return match ? match[1].trim() : '物件名不明';
+    const patterns = [
+      /<h1[^>]*class="[^"]*property-title[^"]*"[^>]*>([^<]+)<\/h1>/i,
+      /<h1[^>]*>([^<]+)<\/h1>/i,
+      /<title>([^<|]+)/i,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1].trim()) {
+        return match[1].trim().replace(/\s+/g, ' ');
+      }
+    }
+    return '物件名不明';
   }
 
   private extractPrice(html: string): number | null {
-    // 「1,980万円」「19800万円」のようなパターン
-    const match = html.match(/価格[：:]*\s*([\d,]+)\s*万円/)
-                || html.match(/販売価格[：:]*\s*([\d,]+)\s*万円/);
-    if (match) {
-      return parseInt(match[1].replace(/,/g, ''), 10) * 10000;
+    const patterns = [
+      /価格[：:\s]*([\d,]+)\s*万円/,
+      /販売価格[：:\s]*([\d,]+)\s*万円/,
+      /([\d,]+)\s*万円/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        const price = parseInt(match[1].replace(/,/g, ''), 10) * 10000;
+        if (price > 0 && price < 10000000000) {
+          return price;
+        }
+      }
     }
+    
+    // 億円パターン
+    const okuMatch = html.match(/(\d+)億(\d*)万?円/);
+    if (okuMatch) {
+      const oku = parseInt(okuMatch[1], 10) * 100000000;
+      const man = okuMatch[2] ? parseInt(okuMatch[2], 10) * 10000 : 0;
+      return oku + man;
+    }
+    
     return null;
   }
 
   private extractAddress(html: string): string | null {
-    const match = html.match(/所在地[：:]*\s*([^<\n]+?)(?:<|$)/)
-                || html.match(/住所[：:]*\s*([^<\n]+?)(?:<|$)/);
-    return match ? match[1].trim() : null;
+    const patterns = [
+      /所在地[：:\s]*<[^>]*>([^<]+)</,
+      /所在地[：:\s]*([^<\n]+)/,
+      /住所[：:\s]*([^<\n]+)/,
+      /北海道[^\s<]+[市町村区][^\s<]*/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return match[1]?.trim() || match[0]?.trim();
+      }
+    }
+    return null;
   }
 
-  private extractNumber(html: string, pattern: RegExp): number | null {
-    const match = html.match(pattern);
+  private extractBuildingArea(html: string): number | null {
+    const patterns = [
+      /建物面積[：:\s]*([\d.]+)\s*[㎡m²]/,
+      /延床面積[：:\s]*([\d.]+)\s*[㎡m²]/,
+      /専有面積[：:\s]*([\d.]+)\s*[㎡m²]/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return parseFloat(match[1]);
+      }
+    }
+    return null;
+  }
+
+  private extractLandArea(html: string): number | null {
+    const match = html.match(/土地面積[：:\s]*([\d.]+)\s*[㎡m²]/);
     return match ? parseFloat(match[1]) : null;
   }
 
   private extractBuiltYear(html: string): number | null {
-    const match = html.match(/築年[月]?[：:]*\s*(\d{4})年/)
-                || html.match(/(\d{4})年[^\d]*築/);
-    return match ? parseInt(match[1], 10) : null;
+    const patterns = [
+      /築年[月]?[：:\s]*(\d{4})年/,
+      /(\d{4})年[^\d]*築/,
+      /築(\d+)年/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        const year = parseInt(match[1], 10);
+        if (year < 100) {
+          return new Date().getFullYear() - year;
+        }
+        return year;
+      }
+    }
+    return null;
   }
 
   private extractRooms(html: string): number | null {
-    const match = html.match(/総戸数[：:]*\s*(\d+)/)
-                || html.match(/(\d+)\s*戸/);
-    return match ? parseInt(match[1], 10) : 1;
+    const patterns = [
+      /総戸数[：:\s]*(\d+)/,
+      /(\d+)\s*戸/,
+      /(\d+)\s*室/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return 1;
   }
 
   private extractPropertyType(html: string): string | null {
-    if (html.includes('一棟') || html.includes('収益物件') || html.includes('マンション')) {
-      return '一棟集合住宅';
+    if (html.includes('一棟') || html.includes('アパート')) {
+      return 'アパート';
     }
     if (html.includes('戸建') || html.includes('一軒家')) {
-      return '中古戸建て';
+      return '一戸建て';
+    }
+    if (html.includes('マンション')) {
+      return 'マンション';
     }
     return null;
   }
 
   private extractExternalId(url: string): string | null {
-    const match = url.match(/\/(\d+)\/?(?:\?|$)/);
+    const match = url.match(/\/(\d+)\/show\.html/);
     return match ? match[1] : null;
   }
 }
