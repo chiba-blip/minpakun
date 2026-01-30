@@ -56,6 +56,29 @@ export async function GET() {
         });
         debug.athomeCandidates = candidates.length;
         debug.athomeSampleUrls = candidates.slice(0, 5).map(c => c.url);
+        
+        // 1件だけ詳細取得テスト
+        if (candidates.length > 0) {
+          try {
+            const detail = await athomeConnector.fetchDetail(candidates[0].url);
+            debug.athomeDetailTest = {
+              url: detail.url,
+              title: detail.title,
+              price: detail.price,
+              address: detail.address_raw,
+            };
+            
+            // DB保存テスト（実際には保存しない、チェックのみ）
+            const { data: existing } = await supabase
+              .from('listings')
+              .select('id, url')
+              .eq('url', candidates[0].url)
+              .single();
+            debug.athomeDbCheck = existing ? 'Already exists in DB' : 'Not in DB, can be inserted';
+          } catch (e) {
+            debug.athomeDetailError = String(e);
+          }
+        }
       } catch (e) {
         debug.athomeSearchError = String(e);
       }
