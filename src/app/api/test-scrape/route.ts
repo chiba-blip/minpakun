@@ -66,18 +66,19 @@ export async function GET(request: NextRequest) {
     // リンク抽出テスト
     const linkPatterns: Record<string, RegExp[]> = {
       athome: [
-        /href="(https:\/\/www\.athome\.co\.jp\/kodate\/\d{10}\/)"/gi,
-        /href="(\/kodate\/\d{10}\/)"/gi,
+        /href="(https:\/\/www\.athome\.co\.jp\/kodate\/\d+\/[^"]*)"/gi,
+        /href="(\/kodate\/\d+\/\?[^"]*)"/gi,
       ],
       homes: [
-        /href="(https:\/\/www\.homes\.co\.jp\/kodate\/b-\d+\/)"/gi,
-        /href="(\/kodate\/b-\d+\/)"/gi,
+        /href="(https:\/\/www\.homes\.co\.jp\/kodate\/b-\d+[^"]*)"/gi,
+        /href="(\/kodate\/b-\d+[^"]*)"/gi,
       ],
       suumo: [
         /href="(\/chukoikkodate\/__JJ_[^"]+)"/gi,
+        /href="(\/chukoikkodate\/[^"]*nc_\d+[^"]*)"/gi,
       ],
       kenbiya: [
-        /href="(\/property\/\d+\/)"/gi,
+        /href="(\/property\/\d+[^"]*)"/gi,
       ],
       rakumachi: [
         /href="(\/syuuekibukken\/[^"]*\/\d+\/show\.html)"/gi,

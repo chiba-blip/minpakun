@@ -180,16 +180,19 @@ export class AthomeConnector implements Connector {
 
   private parseSearchResults(html: string): ListingCandidate[] {
     const results: ListingCandidate[] = [];
-    // アットホームの物件リンク: /kodate/6988076260/
+    // アットホームの物件リンク: /kodate/6988076260/?DOWN=1&...
     const patterns = [
-      /href="(https:\/\/www\.athome\.co\.jp\/kodate\/\d{10}\/)"/gi,
-      /href="(\/kodate\/\d{10}\/)"/gi,
+      /href="(https:\/\/www\.athome\.co\.jp\/kodate\/(\d+)\/[^"]*)"/gi,
+      /href="(\/kodate\/(\d+)\/\?[^"]*)"/gi,
     ];
     for (const p of patterns) {
       for (const m of html.matchAll(p)) {
-        let url = m[1];
-        if (url.startsWith('/')) url = `${this.baseUrl}${url}`;
-        if (!results.some(r => r.url === url)) results.push({ url });
+        // クエリパラメータを除去してURLを正規化
+        const fullUrl = m[1].startsWith('/') ? `${this.baseUrl}${m[1]}` : m[1];
+        const cleanUrl = fullUrl.split('?')[0];
+        if (cleanUrl.match(/\/kodate\/\d+\/?$/) && !results.some(r => r.url === cleanUrl)) {
+          results.push({ url: cleanUrl.endsWith('/') ? cleanUrl : cleanUrl + '/' });
+        }
       }
     }
     return results;
@@ -267,13 +270,16 @@ export class HomesConnector implements Connector {
     const results: ListingCandidate[] = [];
     // ホームズの物件リンク: /kodate/b-1471480000509/
     const patterns = [
-      /href="(https:\/\/www\.homes\.co\.jp\/kodate\/b-\d+\/)"/gi,
-      /href="(\/kodate\/b-\d+\/)"/gi,
+      /href="(https:\/\/www\.homes\.co\.jp\/kodate\/b-\d+[^"]*)"/gi,
+      /href="(\/kodate\/b-\d+[^"]*)"/gi,
     ];
     for (const p of patterns) {
       for (const m of html.matchAll(p)) {
         let url = m[1];
         if (url.startsWith('/')) url = `${this.baseUrl}${url}`;
+        // クエリパラメータを除去
+        url = url.split('?')[0];
+        if (!url.endsWith('/')) url += '/';
         if (!results.some(r => r.url === url)) results.push({ url });
       }
     }
