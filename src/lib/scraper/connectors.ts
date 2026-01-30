@@ -189,20 +189,24 @@ export class RakumachiConnector implements Connector {
     const candidates: ListingCandidate[] = [];
     const maxPages = params.maxPages || 200;
     const dims = params.propertyTypes.map(t => RAKUMACHI_DIMS[t]).filter(Boolean);
+    if (dims.length === 0) dims.push('1004'); // デフォルト: 戸建賃貸
 
+    // 北海道の収益物件を検索
+    // URL例: https://www.rakumachi.jp/syuuekibukken/area/prefecture/dimAll/?dim[]=1004&location_prefecture_id=1
     for (let page = 1; page <= maxPages; page++) {
       try {
         const sp = new URLSearchParams();
-        sp.set('pref', '1');
+        sp.set('location_prefecture_id', '1'); // 北海道
         dims.forEach(d => sp.append('dim[]', d));
         if (page > 1) sp.set('page', String(page));
         sp.set('sort', 'property_created_at');
         sp.set('sort_type', 'desc');
         
         const url = `${this.baseUrl}/syuuekibukken/area/prefecture/dimAll/?${sp.toString()}`;
-        console.log(`[rakumachi] Fetching page ${page}`);
+        console.log(`[rakumachi] Fetching page ${page}: ${url}`);
         const html = await fetchHtml(url);
         const results = this.parseSearchResults(html);
+        console.log(`[rakumachi] Page ${page}: found ${results.length} listings`);
         if (results.length === 0) break;
         candidates.push(...results);
         await throttle(2000);
@@ -211,14 +215,18 @@ export class RakumachiConnector implements Connector {
         break;
       }
     }
+    console.log(`[rakumachi] Total candidates: ${candidates.length}`);
     return candidates.filter((c, i, arr) => arr.findIndex(x => x.url === c.url) === i);
   }
 
   private parseSearchResults(html: string): ListingCandidate[] {
     const results: ListingCandidate[] = [];
+    // 楽待の物件リンクパターン
+    // 例: /syuuekibukken/hokkaido/hokkaido/dim1004/3029351/show.html
     const patterns = [
+      /href="(\/syuuekibukken\/hokkaido\/[^"]*\/\d+\/show\.html)"/gi,
+      /href="(\/syuuekibukken\/[^"]*dim\d+\/\d+\/show\.html)"/gi,
       /href="(\/syuuekibukken\/[^"]*\/\d+\/show\.html)"/gi,
-      /href="(\/syuuekibukken\/[^"]*detail[^"]*)"/gi,
     ];
     for (const p of patterns) {
       for (const m of html.matchAll(p)) {
