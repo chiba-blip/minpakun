@@ -67,14 +67,15 @@ export class SuumoConnector implements Connector {
     const candidates: ListingCandidate[] = [];
     const maxPages = params.maxPages || 200;
     
-    // 札幌市の中古一戸建て検索
-    // ページングは &pn=2 形式
+    // 北海道の中古一戸建て検索（札幌市全区）
+    // sc=01101〜01110 は札幌市の各区コード
     for (let page = 1; page <= maxPages; page++) {
       try {
+        const baseParams = 'ar=010&bs=021&ta=01&sc=01101&sc=01102&sc=01103&sc=01104&sc=01105&sc=01106&sc=01107&sc=01108&sc=01109&sc=01110';
         const url = page === 1 
-          ? `${this.baseUrl}/jj/bukken/ichiran/JJ010FJ001/?ar=010&bs=021&ta=01&sa=01&cb=0.0&ct=9999999&kb=0&kt=9999999&mb=0&mt=9999999&et=9999999&cn=9999999&shkr1=03&shkr2=03&shkr3=03&shkr4=03`
-          : `${this.baseUrl}/jj/bukken/ichiran/JJ010FJ001/?ar=010&bs=021&ta=01&sa=01&cb=0.0&ct=9999999&kb=0&kt=9999999&mb=0&mt=9999999&et=9999999&cn=9999999&shkr1=03&shkr2=03&shkr3=03&shkr4=03&pn=${page}`;
-        console.log(`[suumo] Fetching page ${page}`);
+          ? `${this.baseUrl}/jj/bukken/ichiran/JJ010FJ001/?${baseParams}`
+          : `${this.baseUrl}/jj/bukken/ichiran/JJ010FJ001/?${baseParams}&pn=${page}`;
+        console.log(`[suumo] Fetching page ${page}: ${url}`);
         const html = await fetchHtml(url);
         const results = this.parseSearchResults(html);
         console.log(`[suumo] Page ${page}: found ${results.length} listings`);
@@ -95,18 +96,19 @@ export class SuumoConnector implements Connector {
 
   private parseSearchResults(html: string): ListingCandidate[] {
     const results: ListingCandidate[] = [];
-    // SUUMOの物件リンクパターン: /chukoikkodate/__JJ_JJ010FJ001FC001_arz...
-    const patterns = [
-      /href="(\/chukoikkodate\/__JJ_[^"]+)"/gi,
-      /href="(https:\/\/suumo\.jp\/chukoikkodate\/__JJ_[^"]+)"/gi,
-    ];
-    for (const p of patterns) {
-      for (const m of html.matchAll(p)) {
-        let url = m[1];
-        if (url.startsWith('/')) url = `${this.baseUrl}${url}`;
-        if (!results.some(r => r.url === url)) results.push({ url });
-      }
+    // SUUMOの物件詳細リンクパターン: /jj/bukken/shousai/JJ012FD001/?...&nc=XXXXXXXX
+    // または資料請求リンクから物件番号を抽出: nc=XXXXXXXX
+    const ncPattern = /nc=(\d{8})/g;
+    const foundNcs = new Set<string>();
+    for (const m of html.matchAll(ncPattern)) {
+      foundNcs.add(m[1]);
     }
+    for (const nc of foundNcs) {
+      // 物件詳細URLを構築
+      const url = `${this.baseUrl}/jj/bukken/shousai/JJ012FD001/?ar=010&bs=021&nc=${nc}`;
+      results.push({ url });
+    }
+    console.log(`[suumo] parseSearchResults found ${results.length} unique property IDs`);
     return results;
   }
 
