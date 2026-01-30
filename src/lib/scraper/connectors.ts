@@ -1,6 +1,6 @@
 /**
  * 全ポータルサイトのコネクター
- * maxPages を 30 に設定して全物件を取得
+ * maxPages を 200 に設定して全ページを取得
  */
 import type { Connector, SearchParams, ListingCandidate, ListingDetail, NormalizedListing } from './types';
 import { fetchHtml, throttle } from './http';
@@ -41,7 +41,7 @@ export class KenbiyaConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     
     const typeCodes = params.propertyTypes.map(t => KENBIYA_TYPE_CODES[t]).filter(Boolean);
     const typeCode = typeCodes.length > 0 ? typeCodes[0] : 'pp0';
@@ -187,7 +187,7 @@ export class RakumachiConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     const dims = params.propertyTypes.map(t => RAKUMACHI_DIMS[t]).filter(Boolean);
 
     for (let page = 1; page <= maxPages; page++) {
@@ -300,7 +300,7 @@ export class SuumoConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     const types = params.propertyTypes.length > 0 ? params.propertyTypes : ['一戸建て'];
 
     for (const t of types) {
@@ -394,7 +394,7 @@ export class AthomeConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     const types = params.propertyTypes.length > 0 ? params.propertyTypes : ['一戸建て'];
 
     for (const t of types) {
@@ -488,7 +488,7 @@ export class HomesConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     const types = params.propertyTypes.length > 0 ? params.propertyTypes : ['一戸建て'];
 
     for (const t of types) {
@@ -578,7 +578,7 @@ export class HokkaidoRengotaiConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     const types = params.propertyTypes.length > 0 ? params.propertyTypes : ['一戸建て'];
 
     for (const t of types) {
@@ -666,7 +666,7 @@ export class HousedoConnector implements Connector {
 
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 30;
+    const maxPages = params.maxPages || 200;
     const types = params.propertyTypes.length > 0 ? params.propertyTypes : ['一戸建て'];
 
     for (const t of types) {

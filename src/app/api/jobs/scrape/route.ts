@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     const searchParams: SearchParams = {
       areas: configs.areas || [],
       propertyTypes: configs.property_types || [],
-      maxPages: 30, // 全ページ取得
+      maxPages: 200, // 十分な数のページを取得（SUUMOは82ページ等）
     };
 
     console.log('Search params:', searchParams);
@@ -77,8 +77,8 @@ export async function POST(request: NextRequest) {
         results.details[connector.key].candidates = candidates.length;
         console.log(`Found ${candidates.length} candidates from ${connector.name}`);
 
-        // 各候補の詳細を取得（1サイトあたり最大200件に制限）
-        const maxDetailsPerSite = 200;
+        // 各候補の詳細を取得（1サイトあたり最大2000件）
+        const maxDetailsPerSite = 2000;
         const candidatesToProcess = candidates.slice(0, maxDetailsPerSite);
 
         for (const candidate of candidatesToProcess) {
