@@ -159,9 +159,10 @@ export class AthomeConnector implements Connector {
     
     for (let page = 1; page <= maxPages; page++) {
       try {
+        // アットホームのページネーション: /list/, /list/page2/, /list/page3/...
         const url = page === 1 
           ? `${this.baseUrl}/kodate/chuko/hokkaido/list/`
-          : `${this.baseUrl}/kodate/chuko/hokkaido/list/?page=${page}`;
+          : `${this.baseUrl}/kodate/chuko/hokkaido/list/page${page}/`;
         console.log(`[athome] Fetching page ${page}: ${url}`);
         const html = await fetchHtml(url);
         const results = this.parseSearchResults(html);
@@ -180,9 +181,9 @@ export class AthomeConnector implements Connector {
 
   private parseSearchResults(html: string): ListingCandidate[] {
     const results: ListingCandidate[] = [];
-    // アットホームの物件リンク: /kodate/6988076260/?DOWN=1&...
-    // シンプルなパターンで全てのkodate物件リンクを取得
-    const pattern = /\/kodate\/(\d{9,11})\//g;
+    // アットホームの物件リンク: /kodate/6988076260/?DOWN=1&... または /kodate/6988076260/
+    // IDは10桁の数字
+    const pattern = /\/kodate\/(\d{10})(?:\/|\?)/g;
     for (const m of html.matchAll(pattern)) {
       const url = `${this.baseUrl}/kodate/${m[1]}/`;
       if (!results.some(r => r.url === url)) {
