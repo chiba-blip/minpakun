@@ -10,10 +10,10 @@ import type {
   ListingCandidate, 
   ListingDetail, 
   NormalizedListing 
-} from './types.mts';
-import { fetchHtml, throttle } from '../http.mts';
-import { logInfo, logError } from '../log.mts';
-import { normalizeAddress, extractCity } from '../normalize/address.mts';
+} from './types';
+import { fetchHtml, throttle } from '../http';
+import { logInfo, logError } from '../log';
+import { normalizeAddress, extractCity } from '../normalize/address';
 
 // 楽待は地域コードが異なる可能性があるため、実際のサイトを確認して調整
 const AREA_CODES: Record<string, string> = {

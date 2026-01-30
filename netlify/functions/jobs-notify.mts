@@ -3,9 +3,9 @@
  * 保存検索条件に合致する新着物件をSlack通知
  */
 import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
-import { getSupabaseAdmin } from './_shared/supabase.mts';
-import { sendSlackMessage, buildPropertyNotification } from './_shared/slack.mts';
-import { logInfo, logError } from './_shared/log.mts';
+import { getSupabaseAdmin } from './_shared/supabase';
+import { sendSlackMessage, buildPropertyNotification } from './_shared/slack';
+import { logInfo, logError } from './_shared/log';
 
 export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
   logInfo('jobs-notify started');

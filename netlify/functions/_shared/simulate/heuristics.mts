@@ -8,8 +8,8 @@ import type {
   MonthlyData, 
   Scenario,
   SimulationAssumptions,
-} from './types.mts';
-import { DAYS_IN_MONTH } from './types.mts';
+} from './types';
+import { DAYS_IN_MONTH } from './types';
 
 /**
  * エリアごとの基準値（北海道）

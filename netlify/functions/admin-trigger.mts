@@ -3,10 +3,10 @@
  * ?job=scrape|simulate|notify で任意のジョブを実行
  */
 import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
-import { handler as scrapeHandler } from './jobs-scrape.mts';
-import { handler as simulateHandler } from './jobs-simulate.mts';
-import { handler as notifyHandler } from './jobs-notify.mts';
-import { logInfo, logError } from './_shared/log.mts';
+import { handler as scrapeHandler } from './jobs-scrape';
+import { handler as simulateHandler } from './jobs-simulate';
+import { handler as notifyHandler } from './jobs-notify';
+import { logInfo, logError } from './_shared/log';
 
 export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
   const params = event.queryStringParameters || {};

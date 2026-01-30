@@ -8,10 +8,10 @@ import type {
   ListingCandidate, 
   ListingDetail, 
   NormalizedListing 
-} from './types.mts';
-import { fetchHtml, throttle } from '../http.mts';
-import { logInfo, logError } from '../log.mts';
-import { normalizeAddress, extractCity } from '../normalize/address.mts';
+} from './types';
+import { fetchHtml, throttle } from '../http';
+import { logInfo, logError } from '../log';
+import { normalizeAddress, extractCity } from '../normalize/address';
 
 export class HousedoConnector implements Connector {
   readonly key = 'housedo';
