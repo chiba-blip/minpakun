@@ -25,11 +25,8 @@
 [functions."jobs-notify"]
   schedule = "0 * * * *"  # 1時間ごと
 
-# リダイレクト（SPA対応）
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+# Next.jsのAPIルートは@netlify/plugin-nextjsが自動処理するため
+# /api/* へのリダイレクトは不要
 
 # 環境変数プレースホルダー（Netlify UIで設定）
 # NEXT_PUBLIC_SUPABASE_URL
