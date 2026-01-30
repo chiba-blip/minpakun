@@ -1,90 +1,147 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabaseServer';
+import { createSupabaseServer } from '@/lib/supabaseServer';
 
-type RouteContext = {
-  params: Promise<{ id: string }>;
-};
-
-// 物件詳細取得
 export async function GET(
-  _request: NextRequest,
-  context: RouteContext
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await context.params;
-    const supabase = createServerClient();
+  const { id } = await params;
+  const supabase = await createSupabaseServer();
 
-    const { data: property, error } = await supabase
-      .from('properties')
+  try {
+    // リスティング詳細を取得
+    const { data: listing, error: listingError } = await supabase
+      .from('listings')
       .select(`
-        *,
-        cost_profiles (*),
-        estimates (*)
+        id,
+        url,
+        title,
+        price,
+        scraped_at,
+        raw,
+        portal_sites (
+          name,
+          key,
+          base_url
+        ),
+        properties (
+          id,
+          address_raw,
+          normalized_address,
+          city,
+          building_area,
+          land_area,
+          built_year,
+          rooms,
+          property_type,
+          lat,
+          lng
+        )
       `)
       .eq('id', id)
       .single();
 
-    if (error || !property) {
-      return NextResponse.json(
-        { success: false, error: '物件が見つかりません' },
-        { status: 404 }
-      );
+    if (listingError) {
+      throw listingError;
     }
 
-    // 最新の成功した見積もりを取得
-    const { data: latestEstimate } = await supabase
-      .from('estimates')
-      .select('*')
-      .eq('property_id', id)
-      .eq('status', 'ok')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    // シミュレーション結果を取得
+    const { data: simulations, error: simError } = await supabase
+      .from('simulations')
+      .select(`
+        id,
+        scenario,
+        annual_revenue,
+        annual_profit,
+        assumptions,
+        simulation_monthlies (
+          month,
+          nightly_rate,
+          occupancy_rate,
+          booked_nights,
+          reservations,
+          avg_stay,
+          revenue
+        )
+      `)
+      .eq('listing_id', id)
+      .order('scenario');
+
+    if (simError) {
+      console.error('Failed to fetch simulations:', simError);
+    }
+
+    const property = listing.properties as {
+      id: string;
+      address_raw: string | null;
+      normalized_address: string | null;
+      city: string | null;
+      building_area: number | null;
+      land_area: number | null;
+      built_year: number | null;
+      rooms: number | null;
+      property_type: string | null;
+      lat: number | null;
+      lng: number | null;
+    };
+
+    const price = listing.price || 0;
+    const neutralSim = simulations?.find(s => s.scenario === 'NEUTRAL');
+    const annualRevenue = neutralSim?.annual_revenue || 0;
+    const annualProfit = neutralSim?.annual_profit || Math.round(annualRevenue * 0.4);
+    const renovationBudget = annualProfit * 10 - price;
 
     return NextResponse.json({
-      success: true,
-      data: {
-        ...property,
-        latest_estimate: latestEstimate,
+      id: listing.id,
+      url: listing.url,
+      title: listing.title,
+      price,
+      priceMan: Math.round(price / 10000),
+      scraped_at: listing.scraped_at,
+      portal_site: listing.portal_sites,
+      property: {
+        id: property.id,
+        address: property.address_raw || property.normalized_address || '',
+        city: property.city,
+        building_area: property.building_area,
+        land_area: property.land_area,
+        built_year: property.built_year,
+        rooms: property.rooms,
+        property_type: property.property_type,
+        lat: property.lat,
+        lng: property.lng,
       },
+      simulations: simulations?.map(sim => ({
+        id: sim.id,
+        scenario: sim.scenario,
+        annual_revenue: sim.annual_revenue,
+        annual_revenue_man: Math.round((sim.annual_revenue || 0) / 10000),
+        annual_profit: sim.annual_profit,
+        annual_profit_man: Math.round((sim.annual_profit || 0) / 10000),
+        assumptions: sim.assumptions,
+        monthlies: (sim.simulation_monthlies as {
+          month: number;
+          nightly_rate: number | null;
+          occupancy_rate: number | null;
+          booked_nights: number | null;
+          reservations: number | null;
+          avg_stay: number | null;
+          revenue: number | null;
+        }[])?.sort((a, b) => a.month - b.month),
+      })) || [],
+      annual_revenue: annualRevenue,
+      annual_revenue_man: Math.round(annualRevenue / 10000),
+      annual_profit: annualProfit,
+      annual_profit_man: Math.round(annualProfit / 10000),
+      renovation_budget: renovationBudget,
+      renovation_budget_man: Math.round(renovationBudget / 10000),
+      actual_multiple: annualProfit > 0 ? (price / annualProfit).toFixed(2) : null,
     });
   } catch (error) {
-    console.error('Property API error:', error);
+    console.error('Failed to fetch property:', error);
     return NextResponse.json(
-      { success: false, error: 'リクエストの処理に失敗しました' },
+      { error: String(error) },
       { status: 500 }
     );
   }
 }
-
-// 物件削除
-export async function DELETE(
-  _request: NextRequest,
-  context: RouteContext
-) {
-  try {
-    const { id } = await context.params;
-    const supabase = createServerClient();
-
-    const { error } = await supabase
-      .from('properties')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: '物件の削除に失敗しました' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Property API error:', error);
-    return NextResponse.json(
-      { success: false, error: 'リクエストの処理に失敗しました' },
-      { status: 500 }
-    );
-  }
-}
-

@@ -1,509 +1,522 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import {
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from '@/components/ui/table';
+import { Separator } from '@/components/ui/separator';
+import { 
+  Loader2, 
+  ExternalLink, 
+  Download,
   ArrowLeft,
   Building2,
   MapPin,
-  Train,
-  TrendingUp,
-  TrendingDown,
-  RefreshCw,
-  Loader2,
-  AlertTriangle,
+  Calendar,
+  Ruler,
+  DoorOpen,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Separator } from '@/components/ui/separator';
-import { Property, CostProfile, Estimate, MonthlyEstimate, AnnualEstimate } from '@/types/property';
 
-interface PropertyDetail extends Property {
-  cost_profiles: CostProfile[];
-  latest_estimate: Estimate | null;
+interface MonthlyData {
+  month: number;
+  nightly_rate: number | null;
+  occupancy_rate: number | null;
+  booked_nights: number | null;
+  reservations: number | null;
+  avg_stay: number | null;
+  revenue: number | null;
 }
 
-const MONTH_NAMES = [
-  '1月', '2月', '3月', '4月', '5月', '6月',
-  '7月', '8月', '9月', '10月', '11月', '12月',
-];
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('ja-JP', {
-    style: 'currency',
-    currency: 'JPY',
-    maximumFractionDigits: 0,
-  }).format(value);
+interface CostBreakdown {
+  cleaning_fee_per_reservation: number;
+  ota_fee_rate: number;
+  management_fee_rate: number;
+  other_cost_rate: number;
+  cleaning_cost: number;
+  ota_fee: number;
+  management_fee: number;
+  other_cost: number;
+  total_cost: number;
 }
 
-function formatPercent(value: number): string {
-  return `${Math.round(value * 100)}%`;
+interface Simulation {
+  id: string;
+  scenario: string;
+  annual_revenue: number;
+  annual_revenue_man: number;
+  annual_profit: number | null;
+  annual_profit_man: number | null;
+  assumptions: {
+    costs?: CostBreakdown;
+    [key: string]: unknown;
+  };
+  monthlies: MonthlyData[];
 }
 
-function formatDistance(meters: number): string {
-  if (meters < 1000) {
-    return `${Math.round(meters)}m`;
-  }
-  return `${(meters / 1000).toFixed(1)}km`;
+interface PropertyDetail {
+  id: string;
+  url: string;
+  title: string;
+  price: number;
+  priceMan: number;
+  scraped_at: string;
+  portal_site: { name: string; key: string; base_url: string };
+  property: {
+    id: string;
+    address: string;
+    city: string | null;
+    building_area: number | null;
+    land_area: number | null;
+    built_year: number | null;
+    rooms: number | null;
+    property_type: string | null;
+  };
+  simulations: Simulation[];
+  annual_revenue: number;
+  annual_revenue_man: number;
+  annual_profit: number;
+  annual_profit_man: number;
+  renovation_budget: number;
+  renovation_budget_man: number;
+  actual_multiple: string | null;
 }
 
-export default function PropertyDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const resolvedParams = use(params);
-  const [property, setProperty] = useState<PropertyDetail | null>(null);
+const SCENARIO_LABELS: Record<string, { label: string; color: string }> = {
+  NEGATIVE: { label: 'ネガティブ', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+  NEUTRAL: { label: 'ニュートラル', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+  POSITIVE: { label: 'ポジティブ', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+};
+
+const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+
+export default function PropertyDetailPage() {
+  const params = useParams();
+  const id = params.id as string;
+  const [data, setData] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [estimating, setEstimating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedRange, setSelectedRange] = useState<'conservative' | 'standard' | 'optimistic'>('standard');
 
   useEffect(() => {
-    fetchProperty();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedParams.id]);
+    if (id) {
+      fetchProperty();
+    }
+  }, [id]);
 
   async function fetchProperty() {
     try {
-      const res = await fetch(`/api/properties/${resolvedParams.id}`);
-      const data = await res.json();
-      if (data.success) {
-        setProperty(data.data);
-      } else {
-        setError(data.error || '物件の取得に失敗しました');
-      }
-    } catch (err) {
-      console.error('Failed to fetch property:', err);
-      setError('物件の取得に失敗しました');
+      const res = await fetch(`/api/properties/${id}`);
+      const result = await res.json();
+      setData(result);
+    } catch (error) {
+      console.error('Failed to fetch property:', error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function runEstimate() {
-    if (!property) return;
-
-    setEstimating(true);
-    setError(null);
-
-    try {
-      const costProfile = property.cost_profiles[0];
-      const res = await fetch('/api/estimate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          propertyId: property.id,
-          address: property.address_text,
-          capacity: property.capacity,
-          layoutText: property.layout_text,
-          bedrooms: property.bedrooms,
-          bathrooms: property.bathrooms,
-          cost: costProfile ? {
-            otaFeeRate: costProfile.ota_fee_rate,
-            cleaningCostPerTurnover: costProfile.cleaning_cost_per_turnover,
-            linenCostPerTurnover: costProfile.linen_cost_per_turnover,
-            consumablesCostPerNight: costProfile.consumables_cost_per_night,
-            utilitiesCostPerMonth: costProfile.utilities_cost_per_month,
-            managementFeeRate: costProfile.management_fee_rate,
-            avgStayNights: costProfile.avg_stay_nights,
-            otherFixedCostPerMonth: costProfile.other_fixed_cost_per_month,
-          } : {
-            otaFeeRate: 0.15,
-            cleaningCostPerTurnover: 12000,
-            linenCostPerTurnover: 2500,
-            consumablesCostPerNight: 300,
-            utilitiesCostPerMonth: 8000,
-            managementFeeRate: 0,
-            avgStayNights: 2.0,
-            otherFixedCostPerMonth: 0,
-          },
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        await fetchProperty();
-      } else {
-        setError(data.error || '見積もりに失敗しました');
-      }
-    } catch (err) {
-      console.error('Estimate failed:', err);
-      setError('見積もりの実行に失敗しました');
-    } finally {
-      setEstimating(false);
-    }
+  function downloadCsv(scenario?: string) {
+    const url = scenario 
+      ? `/api/properties/${id}/csv?scenario=${scenario}`
+      : `/api/properties/${id}/csv`;
+    window.open(url, '_blank');
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background">
-        <header className="gradient-header snow-pattern text-white">
-          <div className="container mx-auto px-4 py-6">
-            <Skeleton className="h-4 w-24 bg-white/20 mb-4" />
-            <Skeleton className="h-8 w-64 bg-white/20" />
-          </div>
-        </header>
-        <main className="container mx-auto px-4 py-8">
-          <div className="grid gap-6 md:grid-cols-3">
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-          </div>
-        </main>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
   }
 
-  if (!property) {
+  if (!data) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardContent className="py-8 text-center">
-            <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
-            <h2 className="text-lg font-semibold mb-2">物件が見つかりません</h2>
-            <p className="text-sm text-muted-foreground mb-4">{error}</p>
-            <Link href="/">
-              <Button>物件一覧に戻る</Button>
-            </Link>
-          </CardContent>
-        </Card>
+      <div className="text-center py-12">
+        <p className="text-gray-500">物件が見つかりませんでした</p>
+        <Link href="/properties">
+          <Button variant="outline" className="mt-4">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            一覧に戻る
+          </Button>
+        </Link>
       </div>
     );
   }
 
-  const estimate = property.latest_estimate;
-  const computed = estimate?.computed as {
-    conservative: { monthly: MonthlyEstimate[]; annual: AnnualEstimate };
-    standard: { monthly: MonthlyEstimate[]; annual: AnnualEstimate };
-    optimistic: { monthly: MonthlyEstimate[]; annual: AnnualEstimate };
-  } | null;
-  const nearestStation = estimate?.nearest_station as { name: string; distance_m: number } | null;
-
-  const currentRange = computed?.[selectedRange];
+  // NEUTRALシナリオのデータを取得
+  const neutralSim = data.simulations?.find(s => s.scenario === 'NEUTRAL');
+  const annualProfit = neutralSim?.annual_profit || data.annual_profit || 0;
+  const annualProfitMan = Math.round(annualProfit / 10000);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div>
       {/* ヘッダー */}
-      <header className="gradient-header snow-pattern text-white">
-        <div className="container mx-auto px-4 py-6">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-white/80 hover:text-white text-sm mb-4 transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            物件一覧に戻る
-          </Link>
-          <div className="flex items-center gap-3">
-            <Building2 className="h-7 w-7" />
-            <h1 className="text-xl font-bold">{property.name}</h1>
+      <div className="mb-6">
+        <Link href="/properties" className="text-blue-600 hover:underline text-sm flex items-center gap-1 mb-2">
+          <ArrowLeft className="w-4 h-4" />
+          物件一覧に戻る
+        </Link>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">{data.title || '物件名不明'}</h1>
+            <div className="flex items-center gap-2 mt-2">
+              <Badge variant="outline">{data.portal_site?.name}</Badge>
+              <a 
+                href={data.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+              >
+                元サイトで見る
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
           </div>
-          <div className="flex items-center gap-2 mt-2 text-white/80 text-sm">
-            <MapPin className="h-4 w-4" />
-            <span>{property.address_text}</span>
-          </div>
+          <Button onClick={() => downloadCsv()} variant="outline">
+            <Download className="w-4 h-4 mr-2" />
+            CSV出力
+          </Button>
         </div>
-      </header>
+      </div>
 
-      <main className="container mx-auto px-4 py-8">
-        {/* エラー表示 */}
-        {error && (
-          <Card className="border-destructive bg-destructive/5 mb-6">
-            <CardContent className="py-4 flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
-              <p className="text-sm text-destructive">{error}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* 物件サマリー */}
-        <div className="grid gap-4 md:grid-cols-4 mb-8">
-          <Card>
-            <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">間取り</p>
-              <p className="text-xl font-semibold">{property.layout_text}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">定員</p>
-              <p className="text-xl font-semibold">{property.capacity}名</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">緯度経度</p>
-              <p className="text-lg font-medium">
-                {property.lat && property.lng
-                  ? `${property.lat.toFixed(4)}, ${property.lng.toFixed(4)}`
-                  : '未取得'}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Train className="h-4 w-4" />
-                <span>最寄駅</span>
+      {/* 物件情報カード */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Building2 className="w-5 h-5" />
+              価格情報
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <div className="text-sm text-gray-500">販売価格</div>
+              <div className="text-2xl font-bold">{data.priceMan.toLocaleString()}万円</div>
+            </div>
+            <Separator />
+            <div>
+              <div className="text-sm text-gray-500">年間想定利益（中立）</div>
+              <div className="text-xl font-bold">
+                {annualProfitMan.toLocaleString()}万円
               </div>
-              <p className="text-lg font-medium">
-                {nearestStation
-                  ? `${nearestStation.name} (${formatDistance(nearestStation.distance_m)})`
-                  : '未取得'}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* 見積もり結果 */}
-        {!estimate || estimate.status !== 'ok' ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <TrendingUp className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-              <h3 className="text-lg font-medium mb-2">見積もり結果がありません</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                売上見積もりを実行して収益シミュレーションを確認しましょう
-              </p>
-              <Button onClick={runEstimate} disabled={estimating} className="gap-2">
-                {estimating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    見積もり中...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4" />
-                    見積もりを実行
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* レンジ選択 */}
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-semibold">売上見積もり結果</h2>
-                <p className="text-sm text-muted-foreground">
-                  AirDNA Rentalizerベースの年間収益シミュレーション
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={runEstimate}
-                  disabled={estimating}
-                  className="gap-1"
-                >
-                  {estimating ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3 w-3" />
-                  )}
-                  再計算
-                </Button>
+              <div className="text-xs text-gray-400">
+                売上 {data.annual_revenue_man.toLocaleString()}万円 - コスト
               </div>
             </div>
-
-            <Tabs value={selectedRange} onValueChange={(v) => setSelectedRange(v as typeof selectedRange)}>
-              <TabsList className="mb-6">
-                <TabsTrigger value="conservative" className="gap-1">
-                  <TrendingDown className="h-3 w-3" />
-                  保守的
-                </TabsTrigger>
-                <TabsTrigger value="standard">標準</TabsTrigger>
-                <TabsTrigger value="optimistic" className="gap-1">
-                  <TrendingUp className="h-3 w-3" />
-                  強気
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value={selectedRange}>
-                {currentRange && (
-                  <>
-                    {/* 年次サマリー */}
-                    <div className="grid gap-4 md:grid-cols-4 mb-8">
-                      <Card className="bg-primary/5 border-primary/20">
-                        <CardContent className="py-4">
-                          <p className="text-sm text-muted-foreground">年間総売上</p>
-                          <p className="text-2xl font-bold text-primary">
-                            {formatCurrency(currentRange.annual.gross_revenue)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-destructive/5 border-destructive/20">
-                        <CardContent className="py-4">
-                          <p className="text-sm text-muted-foreground">年間総費用</p>
-                          <p className="text-2xl font-bold text-destructive">
-                            {formatCurrency(currentRange.annual.total_cost)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-green-50 border-green-200">
-                        <CardContent className="py-4">
-                          <p className="text-sm text-muted-foreground">年間ネット収益</p>
-                          <p className="text-2xl font-bold text-green-600">
-                            {formatCurrency(currentRange.annual.net_revenue)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="py-4">
-                          <p className="text-sm text-muted-foreground">平均稼働率</p>
-                          <p className="text-2xl font-bold">
-                            {formatPercent(currentRange.annual.avg_occupancy)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    {/* 月次テーブル */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">月次明細</CardTitle>
-                        <CardDescription>
-                          月ごとの売上・費用・ネット収益の内訳
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="overflow-x-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>月</TableHead>
-                                <TableHead className="text-right">総売上</TableHead>
-                                <TableHead className="text-right">ADR</TableHead>
-                                <TableHead className="text-right">稼働率</TableHead>
-                                <TableHead className="text-right">稼働日数</TableHead>
-                                <TableHead className="text-right">ターンオーバー</TableHead>
-                                <TableHead className="text-right">OTA手数料</TableHead>
-                                <TableHead className="text-right">清掃＋リネン</TableHead>
-                                <TableHead className="text-right">その他費用</TableHead>
-                                <TableHead className="text-right font-semibold">ネット収益</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {currentRange.monthly.map((m) => (
-                                <TableRow key={m.month}>
-                                  <TableCell className="font-medium">
-                                    {MONTH_NAMES[m.month - 1]}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {formatCurrency(m.gross_revenue)}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {formatCurrency(m.adr)}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {formatPercent(m.occupancy_rate)}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {m.occupied_nights.toFixed(1)}日
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    {m.turnovers.toFixed(1)}回
-                                  </TableCell>
-                                  <TableCell className="text-right text-muted-foreground">
-                                    {formatCurrency(m.ota_fee + m.management_fee)}
-                                  </TableCell>
-                                  <TableCell className="text-right text-muted-foreground">
-                                    {formatCurrency(m.cleaning_cost + m.linen_cost)}
-                                  </TableCell>
-                                  <TableCell className="text-right text-muted-foreground">
-                                    {formatCurrency(m.consumables_cost + m.fixed_cost)}
-                                  </TableCell>
-                                  <TableCell className={`text-right font-semibold ${m.net_revenue >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                                    {formatCurrency(m.net_revenue)}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </>
-                )}
-              </TabsContent>
-            </Tabs>
-          </>
-        )}
-
-        {/* 費用パラメータ表示 */}
-        <Separator className="my-8" />
-        
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">費用パラメータ設定</CardTitle>
-            <CardDescription>
-              この物件に設定されている費用パラメータ
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {property.cost_profiles[0] ? (
-              <div className="grid gap-4 md:grid-cols-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">OTA手数料率</p>
-                  <p className="font-medium">{(property.cost_profiles[0].ota_fee_rate * 100).toFixed(1)}%</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">清掃費/回</p>
-                  <p className="font-medium">{formatCurrency(property.cost_profiles[0].cleaning_cost_per_turnover)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">リネン費/回</p>
-                  <p className="font-medium">{formatCurrency(property.cost_profiles[0].linen_cost_per_turnover)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">平均連泊数</p>
-                  <p className="font-medium">{property.cost_profiles[0].avg_stay_nights}日</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">運営代行率</p>
-                  <p className="font-medium">{(property.cost_profiles[0].management_fee_rate * 100).toFixed(1)}%</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">消耗品費/泊</p>
-                  <p className="font-medium">{formatCurrency(property.cost_profiles[0].consumables_cost_per_night)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">光熱通信費/月</p>
-                  <p className="font-medium">{formatCurrency(property.cost_profiles[0].utilities_cost_per_month)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">その他固定費/月</p>
-                  <p className="font-medium">{formatCurrency(property.cost_profiles[0].other_fixed_cost_per_month)}</p>
-                </div>
+            <div>
+              <div className="text-sm text-gray-500">倍率</div>
+              <div className="text-lg font-medium">
+                {data.actual_multiple}倍
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">費用パラメータが設定されていません</p>
-            )}
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">リノベ予算（10倍基準）</div>
+              <div className="text-lg font-medium text-blue-600">
+                {data.renovation_budget_man > 0 
+                  ? `${data.renovation_budget_man.toLocaleString()}万円`
+                  : '-'
+                }
+              </div>
+            </div>
           </CardContent>
         </Card>
-      </main>
 
-      {/* フッター */}
-      <footer className="border-t mt-12">
-        <div className="container mx-auto px-4 py-6">
-          <p className="text-sm text-muted-foreground text-center">
-            © 2024 北海道民泊売上見積ツール - AirDNA Rentalizer連携
-          </p>
-        </div>
-      </footer>
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">物件詳細</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">所在地</div>
+                  <div>{data.property.address || '-'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Ruler className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">建物面積</div>
+                  <div>{data.property.building_area ? `${data.property.building_area}㎡` : '-'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Ruler className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">土地面積</div>
+                  <div>{data.property.land_area ? `${data.property.land_area}㎡` : '-'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Calendar className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">築年</div>
+                  <div>{data.property.built_year ? `${data.property.built_year}年` : '-'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <DoorOpen className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">部屋数/戸数</div>
+                  <div>{data.property.rooms ?? '-'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Building2 className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">物件タイプ</div>
+                  <div>{data.property.property_type || '-'}</div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* シミュレーション結果 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>利益シミュレーション（12ヶ月）</CardTitle>
+          <CardDescription>
+            3つのシナリオ（ネガティブ/ニュートラル/ポジティブ）で計算。売上からコストを差し引いた利益を算出。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.simulations && data.simulations.length > 0 ? (
+            <Tabs defaultValue="NEUTRAL">
+              <div className="flex items-center justify-between mb-4">
+                <TabsList>
+                  {data.simulations.map((sim) => (
+                    <TabsTrigger key={sim.scenario} value={sim.scenario}>
+                      <span className={`px-2 py-1 rounded text-sm border ${SCENARIO_LABELS[sim.scenario]?.color}`}>
+                        {SCENARIO_LABELS[sim.scenario]?.label}
+                      </span>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+
+              {data.simulations.map((sim) => {
+                const costs = sim.assumptions?.costs;
+                const totalReservations = sim.monthlies?.reduce((s, m) => s + (m.reservations || 0), 0) || 0;
+                
+                return (
+                  <TabsContent key={sim.scenario} value={sim.scenario}>
+                    {/* サマリー - 3ブロック */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      {/* 売上ブロック */}
+                      <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                        <div className="text-sm text-slate-500 mb-1">年間売上</div>
+                        <div className="text-2xl font-bold text-slate-700">
+                          {sim.annual_revenue_man.toLocaleString()}万円
+                        </div>
+                      </div>
+                      
+                      {/* コストブロック */}
+                      <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                        <div className="text-sm text-slate-500 mb-1">年間コスト</div>
+                        <div className="text-2xl font-bold text-slate-600">
+                          -{costs ? Math.round(costs.total_cost / 10000).toLocaleString() : 0}万円
+                        </div>
+                        {costs && (
+                          <div className="text-xs text-slate-400 mt-1">
+                            清掃{Math.round(costs.cleaning_cost/10000)}万 / OTA{Math.round(costs.ota_fee/10000)}万 / 運営{Math.round(costs.management_fee/10000)}万 / 他{Math.round(costs.other_cost/10000)}万
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* 利益ブロック */}
+                      <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <div className="text-sm text-blue-600 mb-1">年間利益</div>
+                        <div className="text-2xl font-bold text-blue-700">
+                          {(sim.annual_profit_man || 0).toLocaleString()}万円
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* コスト内訳 */}
+                    {costs && (
+                      <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                        <div className="font-medium text-slate-700 mb-3">コスト内訳</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div className="p-3 bg-white rounded border">
+                            <div className="text-slate-500">清掃費</div>
+                            <div className="font-medium text-slate-700">
+                              {Math.round(costs.cleaning_cost / 10000).toLocaleString()}万円
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {costs.cleaning_fee_per_reservation.toLocaleString()}円 × {totalReservations}回
+                            </div>
+                          </div>
+                          <div className="p-3 bg-white rounded border">
+                            <div className="text-slate-500">OTA手数料</div>
+                            <div className="font-medium text-slate-700">
+                              {Math.round(costs.ota_fee / 10000).toLocaleString()}万円
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              売上の{costs.ota_fee_rate}%
+                            </div>
+                          </div>
+                          <div className="p-3 bg-white rounded border">
+                            <div className="text-slate-500">運営代行</div>
+                            <div className="font-medium text-slate-700">
+                              {Math.round(costs.management_fee / 10000).toLocaleString()}万円
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              売上の{costs.management_fee_rate}%
+                            </div>
+                          </div>
+                          <div className="p-3 bg-white rounded border">
+                            <div className="text-slate-500">その他経費</div>
+                            <div className="font-medium text-slate-700">
+                              {Math.round(costs.other_cost / 10000).toLocaleString()}万円
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              売上の{costs.other_cost_rate}%
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 月次テーブル（全項目1表） */}
+                    <div className="overflow-x-auto border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50">
+                            <TableHead className="w-16">月</TableHead>
+                            <TableHead className="text-right">宿泊単価</TableHead>
+                            <TableHead className="text-right">稼働率</TableHead>
+                            <TableHead className="text-right">稼働日数</TableHead>
+                            <TableHead className="text-right">予約件数</TableHead>
+                            <TableHead className="text-right">平均宿泊</TableHead>
+                            <TableHead className="text-right">売上</TableHead>
+                            <TableHead className="text-right text-slate-500">清掃費</TableHead>
+                            <TableHead className="text-right text-slate-500">OTA</TableHead>
+                            <TableHead className="text-right text-slate-500">運営</TableHead>
+                            <TableHead className="text-right text-slate-500">他</TableHead>
+                            <TableHead className="text-right text-slate-600">コスト計</TableHead>
+                            <TableHead className="text-right text-blue-700 font-bold">利益</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {sim.monthlies?.map((m) => {
+                            const revenue = m.revenue || 0;
+                            const reservations = m.reservations || 0;
+                            const cleaningCost = costs ? reservations * costs.cleaning_fee_per_reservation : 0;
+                            const otaFee = costs ? Math.round(revenue * (costs.ota_fee_rate / 100)) : 0;
+                            const managementFee = costs ? Math.round(revenue * (costs.management_fee_rate / 100)) : 0;
+                            const otherCost = costs ? Math.round(revenue * (costs.other_cost_rate / 100)) : 0;
+                            const monthlyCost = cleaningCost + otaFee + managementFee + otherCost;
+                            const monthlyProfit = revenue - monthlyCost;
+                            
+                            return (
+                              <TableRow key={m.month}>
+                                <TableCell className="font-medium">{MONTH_NAMES[m.month - 1]}</TableCell>
+                                <TableCell className="text-right">
+                                  {m.nightly_rate?.toLocaleString()}円
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {m.occupancy_rate?.toFixed(1)}%
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {m.booked_nights}日
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {reservations}件
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {m.avg_stay?.toFixed(1)}泊
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {(revenue / 10000).toFixed(1)}万円
+                                </TableCell>
+                                <TableCell className="text-right text-slate-500">
+                                  {(cleaningCost / 10000).toFixed(1)}万
+                                </TableCell>
+                                <TableCell className="text-right text-slate-500">
+                                  {(otaFee / 10000).toFixed(1)}万
+                                </TableCell>
+                                <TableCell className="text-right text-slate-500">
+                                  {(managementFee / 10000).toFixed(1)}万
+                                </TableCell>
+                                <TableCell className="text-right text-slate-500">
+                                  {(otherCost / 10000).toFixed(1)}万
+                                </TableCell>
+                                <TableCell className="text-right text-slate-600">
+                                  {(monthlyCost / 10000).toFixed(1)}万円
+                                </TableCell>
+                                <TableCell className="text-right font-medium text-blue-700">
+                                  {(monthlyProfit / 10000).toFixed(1)}万円
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          <TableRow className="bg-slate-100 font-bold">
+                            <TableCell>年間合計</TableCell>
+                            <TableCell className="text-right">-</TableCell>
+                            <TableCell className="text-right">-</TableCell>
+                            <TableCell className="text-right">
+                              {sim.monthlies?.reduce((s, m) => s + (m.booked_nights || 0), 0)}日
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {totalReservations}件
+                            </TableCell>
+                            <TableCell className="text-right">-</TableCell>
+                            <TableCell className="text-right">
+                              {sim.annual_revenue_man.toLocaleString()}万円
+                            </TableCell>
+                            <TableCell className="text-right text-slate-500">
+                              {costs ? Math.round(costs.cleaning_cost / 10000) : 0}万
+                            </TableCell>
+                            <TableCell className="text-right text-slate-500">
+                              {costs ? Math.round(costs.ota_fee / 10000) : 0}万
+                            </TableCell>
+                            <TableCell className="text-right text-slate-500">
+                              {costs ? Math.round(costs.management_fee / 10000) : 0}万
+                            </TableCell>
+                            <TableCell className="text-right text-slate-500">
+                              {costs ? Math.round(costs.other_cost / 10000) : 0}万
+                            </TableCell>
+                            <TableCell className="text-right text-slate-600">
+                              {costs ? Math.round(costs.total_cost / 10000).toLocaleString() : 0}万円
+                            </TableCell>
+                            <TableCell className="text-right text-blue-700">
+                              {(sim.annual_profit_man || 0).toLocaleString()}万円
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <div className="mt-4 flex justify-end">
+                      <Button variant="outline" size="sm" onClick={() => downloadCsv(sim.scenario)}>
+                        <Download className="w-4 h-4 mr-2" />
+                        このシナリオをCSV出力
+                      </Button>
+                    </div>
+                  </TabsContent>
+                );
+              })}
+            </Tabs>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              シミュレーションデータがありません
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
-

@@ -1,98 +1,151 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabaseServer';
+import { createSupabaseServer } from '@/lib/supabaseServer';
 
-// 物件一覧取得
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const supabase = await createSupabaseServer();
+  const { searchParams } = new URL(request.url);
+  
+  const multiple = parseFloat(searchParams.get('multiple') || '7');
+  const areas = searchParams.get('areas')?.split(',').filter(Boolean) || [];
+  const propertyTypes = searchParams.get('types')?.split(',').filter(Boolean) || [];
+  const page = parseInt(searchParams.get('page') || '1');
+  const limit = parseInt(searchParams.get('limit') || '20');
+  const offset = (page - 1) * limit;
+
   try {
-    const supabase = createServerClient();
-    
-    const { data, error } = await supabase
-      .from('properties')
+    // リスティングとシミュレーションを結合して取得
+    let query = supabase
+      .from('listings')
       .select(`
-        *,
-        cost_profiles (*)
+        id,
+        url,
+        title,
+        price,
+        scraped_at,
+        property_id,
+        portal_sites (
+          name,
+          key
+        ),
+        properties!inner (
+          id,
+          address_raw,
+          normalized_address,
+          city,
+          building_area,
+          land_area,
+          built_year,
+          rooms,
+          property_type
+        ),
+        simulations (
+          id,
+          scenario,
+          annual_revenue,
+          annual_profit
+        )
       `)
-      .order('created_at', { ascending: false });
+      .not('price', 'is', null)
+      .order('scraped_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    // エリアフィルタ
+    if (areas.length > 0) {
+      query = query.in('properties.city', areas);
+    }
+
+    // 物件タイプフィルタ
+    if (propertyTypes.length > 0) {
+      query = query.in('properties.property_type', propertyTypes);
+    }
+
+    const { data: listings, error, count } = await query;
 
     if (error) {
-      console.error('Failed to fetch properties:', error);
-      return NextResponse.json(
-        { success: false, error: '物件一覧の取得に失敗しました' },
-        { status: 500 }
-      );
+      throw error;
     }
 
-    return NextResponse.json({ success: true, data });
-  } catch (error) {
-    console.error('Properties API error:', error);
-    return NextResponse.json(
-      { success: false, error: 'リクエストの処理に失敗しました' },
-      { status: 500 }
-    );
-  }
-}
+    // 倍率フィルタと整形
+    const results = listings
+      ?.map(listing => {
+        const property = listing.properties as {
+          id: string;
+          address_raw: string | null;
+          normalized_address: string | null;
+          city: string | null;
+          building_area: number | null;
+          land_area: number | null;
+          built_year: number | null;
+          rooms: number | null;
+          property_type: string | null;
+        };
 
-// 物件作成
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const supabase = createServerClient();
+        const simulations = listing.simulations as {
+          id: string;
+          scenario: string;
+          annual_revenue: number | null;
+          annual_profit: number | null;
+        }[];
 
-    // トランザクション的に物件と費用プロファイルを作成
-    const { data: property, error: propertyError } = await supabase
-      .from('properties')
-      .insert({
-        name: body.name,
-        address_text: body.address,
-        capacity: body.capacity,
-        layout_text: body.layoutText,
-        bedrooms: body.bedrooms || null,
-        bathrooms: body.bathrooms || null,
-        description: body.description || null,
+        const neutralSim = simulations?.find(s => s.scenario === 'NEUTRAL');
+        const annualRevenue = neutralSim?.annual_revenue || 0;
+        // 利益がない場合は売上の40%を仮の利益として使用（コスト60%想定）
+        const annualProfit = neutralSim?.annual_profit || Math.round(annualRevenue * 0.4);
+        const price = listing.price || 0;
+        
+        // シミュレーションがない場合はスキップしない（とりあえず表示）
+        if (annualRevenue === 0) {
+          return null; // シミュレーション未実行の物件は除外
+        }
+        
+        // 倍率判定（利益ベース）
+        const actualMultiple = annualProfit > 0 ? price / annualProfit : Infinity;
+        const meetsCondition = actualMultiple <= multiple;
+
+        // リノベ予算 = 年間利益×10 - 価格
+        const renovationBudget = annualProfit * 10 - price;
+
+        return {
+          id: listing.id,
+          url: listing.url,
+          title: listing.title,
+          price,
+          priceMan: Math.round(price / 10000),
+          scraped_at: listing.scraped_at,
+          portal_site: listing.portal_sites,
+          property_id: property.id,
+          address: property.address_raw || property.normalized_address || '',
+          city: property.city,
+          building_area: property.building_area,
+          land_area: property.land_area,
+          built_year: property.built_year,
+          rooms: property.rooms,
+          property_type: property.property_type,
+          annual_revenue: annualRevenue,  // 売上
+          annual_revenue_man: Math.round(annualRevenue / 10000),
+          annual_profit: annualProfit,    // 利益（売上-コスト）
+          annual_profit_man: Math.round(annualProfit / 10000),
+          actual_multiple: actualMultiple,
+          renovation_budget: renovationBudget,
+          renovation_budget_man: Math.round(renovationBudget / 10000),
+          meets_condition: meetsCondition,
+          simulations,
+        };
       })
-      .select()
-      .single();
-
-    if (propertyError || !property) {
-      console.error('Failed to create property:', propertyError);
-      return NextResponse.json(
-        { success: false, error: '物件の作成に失敗しました' },
-        { status: 500 }
-      );
-    }
-
-    // 費用プロファイルを作成
-    const cost = body.cost;
-    const { error: costError } = await supabase
-      .from('cost_profiles')
-      .insert({
-        property_id: property.id,
-        ota_fee_rate: cost.otaFeeRate,
-        cleaning_cost_per_turnover: cost.cleaningCostPerTurnover,
-        linen_cost_per_turnover: cost.linenCostPerTurnover,
-        consumables_cost_per_night: cost.consumablesCostPerNight || 0,
-        utilities_cost_per_month: cost.utilitiesCostPerMonth || 0,
-        management_fee_rate: cost.managementFeeRate || 0,
-        avg_stay_nights: cost.avgStayNights || 2.0,
-        other_fixed_cost_per_month: cost.otherFixedCostPerMonth || 0,
-      });
-
-    if (costError) {
-      console.error('Failed to create cost profile:', costError);
-      // 物件は作成されているので、エラーだがIDは返す
-    }
+      .filter(item => item.meets_condition);
 
     return NextResponse.json({
-      success: true,
-      propertyId: property.id,
+      items: results,
+      total: results?.length || 0,
+      page,
+      limit,
+      multiple,
     });
-
   } catch (error) {
-    console.error('Properties API error:', error);
+    console.error('Failed to fetch properties:', error);
     return NextResponse.json(
-      { success: false, error: 'リクエストの処理に失敗しました' },
+      { error: String(error) },
       { status: 500 }
     );
   }
 }
-

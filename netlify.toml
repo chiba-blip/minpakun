@@ -1,10 +1,39 @@
 [build]
   command = "npm run build"
   publish = ".next"
+  functions = "netlify/functions"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
 [build.environment]
   NEXT_TELEMETRY_DISABLED = "1"
+  NODE_VERSION = "18"
 
+# Netlify Functions設定
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+
+# Scheduled Functions
+[functions."jobs-scrape"]
+  schedule = "0 */6 * * *"  # 6時間ごと（0, 6, 12, 18時）
+
+[functions."jobs-simulate"]
+  schedule = "30 */6 * * *"  # 6時間ごと（scrapeの30分後）
+
+[functions."jobs-notify"]
+  schedule = "0 * * * *"  # 1時間ごと
+
+# リダイレクト（SPA対応）
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# 環境変数プレースホルダー（Netlify UIで設定）
+# NEXT_PUBLIC_SUPABASE_URL
+# NEXT_PUBLIC_SUPABASE_ANON_KEY
+# SUPABASE_SERVICE_ROLE_KEY
+# SLACK_WEBHOOK_URL
+# ADMIN_TRIGGER_TOKEN
