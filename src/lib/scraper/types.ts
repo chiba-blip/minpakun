@@ -27,7 +27,7 @@ export interface ListingDetail {
   property_type: string | null;
   images?: string[];
   description?: string;
-  external_id?: string;
+  external_id: string | null;
   raw: Record<string, unknown>;
 }
 
