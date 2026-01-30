@@ -181,20 +181,15 @@ export class AthomeConnector implements Connector {
   private parseSearchResults(html: string): ListingCandidate[] {
     const results: ListingCandidate[] = [];
     // アットホームの物件リンク: /kodate/6988076260/?DOWN=1&...
-    const patterns = [
-      /href="(https:\/\/www\.athome\.co\.jp\/kodate\/(\d+)\/[^"]*)"/gi,
-      /href="(\/kodate\/(\d+)\/\?[^"]*)"/gi,
-    ];
-    for (const p of patterns) {
-      for (const m of html.matchAll(p)) {
-        // クエリパラメータを除去してURLを正規化
-        const fullUrl = m[1].startsWith('/') ? `${this.baseUrl}${m[1]}` : m[1];
-        const cleanUrl = fullUrl.split('?')[0];
-        if (cleanUrl.match(/\/kodate\/\d+\/?$/) && !results.some(r => r.url === cleanUrl)) {
-          results.push({ url: cleanUrl.endsWith('/') ? cleanUrl : cleanUrl + '/' });
-        }
+    // シンプルなパターンで全てのkodate物件リンクを取得
+    const pattern = /\/kodate\/(\d{9,11})\//g;
+    for (const m of html.matchAll(pattern)) {
+      const url = `${this.baseUrl}/kodate/${m[1]}/`;
+      if (!results.some(r => r.url === url)) {
+        results.push({ url });
       }
     }
+    console.log(`[athome] parseSearchResults found ${results.length} unique links`);
     return results;
   }
 
