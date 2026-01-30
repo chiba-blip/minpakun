@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
-import { Loader2, Globe } from 'lucide-react';
+import { Loader2, Globe, AlertCircle } from 'lucide-react';
 import type { PortalSite } from '@/types/database';
 
 export default function SitesSettingsPage() {
   const [sites, setSites] = useState<PortalSite[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSites();
@@ -20,9 +20,20 @@ export default function SitesSettingsPage() {
     try {
       const res = await fetch('/api/settings/sites');
       const data = await res.json();
-      setSites(data);
+      
+      if (!res.ok) {
+        setError(data.error || 'Failed to fetch sites');
+        return;
+      }
+      
+      if (Array.isArray(data)) {
+        setSites(data);
+      } else {
+        setError('Invalid response format');
+      }
     } catch (error) {
       console.error('Failed to fetch sites:', error);
+      setError(String(error));
     } finally {
       setLoading(false);
     }
@@ -55,6 +66,26 @@ export default function SitesSettingsPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="max-w-2xl">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold">ポータルサイト設定</h1>
+        </div>
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+          <div>
+            <p className="font-medium text-red-800">エラーが発生しました</p>
+            <p className="text-sm text-red-700 mt-1">{error}</p>
+            <p className="text-sm text-red-600 mt-2">
+              Netlifyの環境変数（SUPABASE_SERVICE_ROLE_KEY）が設定されているか確認してください。
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl">
       <div className="mb-6">
@@ -75,29 +106,36 @@ export default function SitesSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {sites.map((site) => (
-              <div
-                key={site.id}
-                className="flex items-center justify-between p-4 border rounded-lg"
-              >
-                <div>
-                  <div className="font-medium">{site.name}</div>
-                  <div className="text-sm text-gray-500">{site.base_url}</div>
+          {sites.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">
+              ポータルサイトが登録されていません。<br />
+              Supabaseでportal_sitesテーブルにデータを追加してください。
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {sites.map((site) => (
+                <div
+                  key={site.id}
+                  className="flex items-center justify-between p-4 border rounded-lg"
+                >
+                  <div>
+                    <div className="font-medium">{site.name}</div>
+                    <div className="text-sm text-gray-500">{site.base_url}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {saving === site.id && (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    )}
+                    <Switch
+                      checked={site.enabled}
+                      onCheckedChange={(checked) => toggleSite(site.id, checked)}
+                      disabled={saving === site.id}
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {saving === site.id && (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  )}
-                  <Switch
-                    checked={site.enabled}
-                    onCheckedChange={(checked) => toggleSite(site.id, checked)}
-                    disabled={saving === site.id}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
