@@ -9,6 +9,7 @@ import {
   Clock, 
   Loader2,
   Play,
+  Trash2,
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -59,6 +60,33 @@ export default function DashboardPage() {
     } catch (error) {
       console.error(`Failed to trigger ${job}:`, error);
       alert(`${job}の実行に失敗しました`);
+    } finally {
+      setTriggering(null);
+    }
+  }
+
+  async function deleteAllData() {
+    if (!confirm('本当に全ての物件データを削除しますか？この操作は取り消せません。')) {
+      return;
+    }
+    
+    setTriggering('delete');
+    try {
+      const res = await fetch('/api/jobs/delete-all', {
+        method: 'POST',
+      });
+      const result = await res.json();
+      
+      if (result.success) {
+        alert('全物件データを削除しました');
+      } else {
+        alert('削除に失敗しました: ' + (result.error || '不明なエラー'));
+      }
+      
+      await fetchStats();
+    } catch (error) {
+      console.error('Failed to delete all:', error);
+      alert('削除に失敗しました');
     } finally {
       setTriggering(null);
     }
@@ -182,6 +210,19 @@ export default function DashboardPage() {
                 <Play className="w-4 h-4 mr-2" />
               )}
               通知チェック実行
+            </Button>
+
+            <Button
+              onClick={deleteAllData}
+              disabled={!!triggering}
+              variant="destructive"
+            >
+              {triggering === 'delete' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4 mr-2" />
+              )}
+              全件削除
             </Button>
           </div>
         </CardContent>
