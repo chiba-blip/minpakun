@@ -64,17 +64,8 @@ export async function GET(request: NextRequest) {
     // 倍率フィルタと整形
     const results = listings
       ?.map(listing => {
-        const property = listing.properties as {
-          id: string;
-          address_raw: string | null;
-          normalized_address: string | null;
-          city: string | null;
-          building_area: number | null;
-          land_area: number | null;
-          built_year: number | null;
-          rooms: number | null;
-          property_type: string | null;
-        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const property = listing.properties as any;
 
         const simulations = listing.simulations as {
           id: string;
@@ -102,7 +93,7 @@ export async function GET(request: NextRequest) {
         return {
           url: listing.url,
           title: listing.title || '',
-          portalSite: (listing.portal_sites as { name: string })?.name || '',
+          portalSite: (listing.portal_sites as any)?.name || '',
           price,
           priceMan: Math.round(price / 10000),
           address: property.address_raw || property.normalized_address || '',

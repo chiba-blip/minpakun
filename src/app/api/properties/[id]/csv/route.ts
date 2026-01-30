@@ -113,7 +113,8 @@ export async function GET(
       ...rows.map(row => row.join(',')),
     ].join('\n');
 
-    const property = listing?.properties as { address_raw: string | null } | null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const property = listing?.properties as any;
     const filename = `simulation_${listing?.title || id}_${scenario || 'all'}.csv`;
 
     return new NextResponse(csvContent, {

@@ -71,19 +71,8 @@ export async function GET(
       console.error('Failed to fetch simulations:', simError);
     }
 
-    const property = listing.properties as {
-      id: string;
-      address_raw: string | null;
-      normalized_address: string | null;
-      city: string | null;
-      building_area: number | null;
-      land_area: number | null;
-      built_year: number | null;
-      rooms: number | null;
-      property_type: string | null;
-      lat: number | null;
-      lng: number | null;
-    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const property = listing.properties as any;
 
     const price = listing.price || 0;
     const neutralSim = simulations?.find(s => s.scenario === 'NEUTRAL');

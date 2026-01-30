@@ -76,14 +76,8 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const property = listing.properties as {
-        id: string;
-        building_area: number | null;
-        land_area: number | null;
-        rooms: number | null;
-        property_type: string | null;
-        city: string | null;
-      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const property = listing.properties as any;
 
       if (!property) continue;
 

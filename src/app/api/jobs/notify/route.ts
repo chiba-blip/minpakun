@@ -78,13 +78,8 @@ export async function POST(request: NextRequest) {
       for (const listing of newListings) {
         results.checked++;
 
-        const property = listing.properties as {
-          id: string;
-          address_raw: string | null;
-          city: string | null;
-          building_area: number | null;
-          property_type: string | null;
-        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const property = listing.properties as any;
 
         if (!property) continue;
 
