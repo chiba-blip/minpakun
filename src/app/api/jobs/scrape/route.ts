@@ -40,7 +40,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(results);
     }
 
-    // 2. Connector取得
+    // 2. スクレイプ条件を取得（エリアフィルタリング用）
+    const { data: scrapeConfig } = await supabase
+      .from('scrape_configs')
+      .select('areas')
+      .eq('enabled', true)
+      .limit(1)
+      .single();
+    
+    const targetAreas: string[] = scrapeConfig?.areas || [];
+    console.log(`[scrape] Target areas: ${targetAreas.length > 0 ? targetAreas.join(', ') : 'ALL'}`);
+
+    // 3. Connector取得
     const connector = getConnector(targetSite);
     if (!connector) {
       results.message = `コネクタ「${targetSite}」が見つかりません`;
@@ -49,9 +60,9 @@ export async function POST(request: NextRequest) {
 
     console.log(`[scrape] Starting: ${connector.name} (${targetSite})`);
 
-    // 3. 検索実行（1ページのみ）
+    // 4. 検索実行（1ページのみ）
     const searchConfig: SearchParams = {
-      areas: [],
+      areas: targetAreas,
       propertyTypes: [],
       maxPages: MAX_PAGES,
     };
@@ -59,8 +70,9 @@ export async function POST(request: NextRequest) {
     const candidates = await connector.search(searchConfig);
     console.log(`[scrape] Found ${candidates.length} candidates`);
 
-    // 4. 詳細取得（5件のみ）
+    // 5. 詳細取得（5件のみ）
     const candidatesToProcess = candidates.slice(0, MAX_DETAILS);
+    let areaFiltered = 0;
 
     for (const candidate of candidatesToProcess) {
       results.processed++;
@@ -80,10 +92,22 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // 詳細取得 & 保存
+        // 詳細取得
         console.log(`[scrape] Fetching detail: ${candidate.url}`);
         const detail = await connector.fetchDetail(candidate.url);
         const normalized = connector.normalize(detail);
+        
+        // エリアフィルタリング: 対象エリアが設定されている場合、住所をチェック
+        if (targetAreas.length > 0 && normalized.property.address_raw) {
+          const address = normalized.property.address_raw;
+          const matchesArea = targetAreas.some(area => address.includes(area));
+          if (!matchesArea) {
+            areaFiltered++;
+            console.log(`[scrape] Skip (area): ${address}`);
+            continue;
+          }
+        }
+        
         await saveListing(supabase, site.id, normalized);
         results.inserted++;
         console.log(`[scrape] Inserted: ${normalized.title?.substring(0, 30)}...`);
@@ -93,6 +117,10 @@ export async function POST(request: NextRequest) {
         results.errors.push(String(error));
         console.error(`[scrape] Error: ${candidate.url}`, error);
       }
+    }
+    
+    if (areaFiltered > 0) {
+      console.log(`[scrape] Area filtered: ${areaFiltered} items`);
     }
 
     results.message = `${connector.name}: ${results.inserted}件取得、${results.skipped}件スキップ（候補${candidates.length}件中${candidatesToProcess.length}件処理）`;

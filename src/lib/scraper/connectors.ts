@@ -199,11 +199,33 @@ export class AthomeConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    
+    // アットホームの住所パターン: 「所在地」の後に「北海道...」
+    let address = null;
+    const addressPatterns = [
+      /所在地[^北海道]*北海道([^<\|]+)/i,
+      /北海道[^\s,<\|]+市[^\s,<\|]+/,
+      /北海道[^\s,<\|]+町[^\s,<\|]*/,
+      /北海道[^\s,<\|]+村[^\s,<\|]*/,
+    ];
+    for (const p of addressPatterns) {
+      const m = html.match(p);
+      if (m) {
+        address = m[0].includes('所在地') ? `北海道${m[1].trim()}` : m[0].trim();
+        break;
+      }
+    }
+    
+    // タイトル: h1またはページタイトルから
+    let title = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([^<]+)</i)?.[1]?.trim();
+    if (!title) title = html.match(/<title>([^<]+)</i)?.[1]?.split('|')[0]?.trim();
+    if (!title) title = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim();
+    
     return {
       url,
-      title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
+      title: title || '物件名不明',
       price: extractPrice(html),
-      address_raw: html.match(/北海道[^\s<]+/)?.[0] || null,
+      address_raw: address,
       building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
@@ -287,11 +309,35 @@ export class HomesConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    
+    // ホームズのタイトル: ページタイトルから取得（「【ホームズ】物件名｜...」形式）
+    let title = null;
+    const titleMatch = html.match(/<title>(?:【ホームズ】)?([^｜<]+)/i);
+    if (titleMatch) title = titleMatch[1].trim();
+    if (!title) {
+      const h1Match = html.match(/中古一戸建て([^0-9<]+)/i);
+      if (h1Match) title = h1Match[1].trim();
+    }
+    
+    // 住所: 「所在地」の後または「北海道...」パターン
+    let address = null;
+    const addressPatterns = [
+      /所在地[^北海道]*?(北海道[^\s<\|]+)/i,
+      /北海道[^\s,<\|]+(?:市|町|村)[^\s,<\|]*/,
+    ];
+    for (const p of addressPatterns) {
+      const m = html.match(p);
+      if (m) {
+        address = m[1] || m[0];
+        break;
+      }
+    }
+    
     return {
       url,
-      title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
+      title: title || '物件名不明',
       price: extractPrice(html),
-      address_raw: html.match(/北海道[^\s<]+/)?.[0] || null,
+      address_raw: address,
       building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
