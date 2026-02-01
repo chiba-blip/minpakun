@@ -1,7 +1,7 @@
 /**
  * Slack通知ユーティリティ
  */
-import { logError, logInfo } from './log';
+import { logError, logInfo } from './log.mts';
 
 export interface SlackMessage {
   text: string;

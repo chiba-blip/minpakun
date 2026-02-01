@@ -2,14 +2,14 @@
  * Connector管理
  * 有効なサイトのConnectorを動的にロード
  */
-import type { Connector } from './types';
-import { KenbiyaConnector } from './kenbiya';
-import { RakumachiConnector } from './rakumachi';
-import { SuumoConnector } from './suumo';
-import { AthomeConnector } from './athome';
-import { HomesConnector } from './homes';
-import { HokkaidoRengotaiConnector } from './hokkaido-rengotai';
-import { HousedoConnector } from './housedo';
+import type { Connector } from './types.mts';
+import { KenbiyaConnector } from './kenbiya.mts';
+import { RakumachiConnector } from './rakumachi.mts';
+import { SuumoConnector } from './suumo.mts';
+import { AthomeConnector } from './athome.mts';
+import { HomesConnector } from './homes.mts';
+import { HokkaidoRengotaiConnector } from './hokkaido-rengotai.mts';
+import { HousedoConnector } from './housedo.mts';
 
 /**
  * 利用可能なConnector一覧

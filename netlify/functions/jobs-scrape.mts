@@ -3,11 +3,11 @@
  * Netlify Scheduled Function: 6時間ごとに実行
  */
 import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
-import { getSupabaseAdmin } from './_shared/supabase';
-import { getConnectors } from './_shared/connectors/index';
-import type { SearchParams, NormalizedListing } from './_shared/connectors/types';
-import { logInfo, logError } from './_shared/log';
-import { throttle } from './_shared/http';
+import { getSupabaseAdmin } from './_shared/supabase.mts';
+import { getConnectors } from './_shared/connectors/index.mts';
+import type { SearchParams, NormalizedListing } from './_shared/connectors/types.mts';
+import { logInfo, logError } from './_shared/log.mts';
+import { throttle } from './_shared/http.mts';
 
 export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
   logInfo('jobs-scrape started');

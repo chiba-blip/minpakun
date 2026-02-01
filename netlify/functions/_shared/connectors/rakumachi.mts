@@ -13,10 +13,10 @@ import type {
   ListingCandidate, 
   ListingDetail, 
   NormalizedListing 
-} from './types';
-import { fetchHtml, throttle } from '../http';
-import { logInfo, logError } from '../log';
-import { normalizeAddress, extractCity } from '../normalize/address';
+} from './types.mts';
+import { fetchHtml, throttle } from '../http.mts';
+import { logInfo, logError } from '../log.mts';
+import { normalizeAddress, extractCity } from '../normalize/address.mts';
 
 // 北海道の都道府県コード
 const HOKKAIDO_PREF_ID = '1';

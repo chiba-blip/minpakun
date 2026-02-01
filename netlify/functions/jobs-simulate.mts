@@ -3,10 +3,10 @@
  * 新規リスティングに対して3シナリオのシミュレーションを実行
  */
 import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
-import { getSupabaseAdmin } from './_shared/supabase';
-import { runSimulation } from './_shared/simulate/index';
-import type { PropertyInput } from './_shared/simulate/types';
-import { logInfo, logError } from './_shared/log';
+import { getSupabaseAdmin } from './_shared/supabase.mts';
+import { runSimulation } from './_shared/simulate/index.mts';
+import type { PropertyInput } from './_shared/simulate/types.mts';
+import { logInfo, logError } from './_shared/log.mts';
 
 export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
   logInfo('jobs-simulate started');

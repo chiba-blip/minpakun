@@ -6,7 +6,7 @@ import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
 import { handler as scrapeHandler } from './jobs-scrape';
 import { handler as simulateHandler } from './jobs-simulate';
 import { handler as notifyHandler } from './jobs-notify';
-import { logInfo, logError } from './_shared/log';
+import { logInfo, logError } from './_shared/log.mts';
 
 export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
   const params = event.queryStringParameters || {};

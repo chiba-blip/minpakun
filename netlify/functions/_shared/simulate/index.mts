@@ -2,11 +2,11 @@
  * シミュレーション実行エントリポイント
  * AirROI → AirDNA → Heuristics の順でフォールバック
  */
-import type { PropertyInput, SimulationResult, SimulationAssumptions } from './types';
-import { runHeuristicsSimulation } from './heuristics';
+import type { PropertyInput, SimulationResult, SimulationAssumptions } from './types.mts';
+import { runHeuristicsSimulation } from './heuristics.mts';
 // import { runAirroiSimulation } from './airoi';
 // import { runAirdnaSimulation } from './airdna';
-import { logInfo, logWarn } from '../log';
+import { logInfo, logWarn } from '../log.mts';
 
 /**
  * シミュレーションを実行
