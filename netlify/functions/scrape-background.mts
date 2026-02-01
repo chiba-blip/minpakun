@@ -16,10 +16,11 @@ export const config: Config = {
   path: '/.netlify/functions/scrape-background',
 };
 
-// アットホーム専用: 多くのページと詳細を処理
-const MAX_PAGES = 50;  // 最大50ページ（1ページ30件 = 最大1500件の候補）
-const MAX_DETAILS = 500; // 最大500件の詳細取得
-const THROTTLE_MS = 2000; // 2秒間隔（サーバー負荷軽減）
+// 大量スクレイピング設定（15分で最大2000件処理可能）
+const MAX_PAGES = 100;    // 最大100ページ（1ページ30件 = 最大3000件の候補）
+const MAX_DETAILS = 2000; // 最大2000件の詳細取得
+const SEARCH_THROTTLE_MS = 1500; // 検索ページ: 1.5秒間隔
+const DETAIL_THROTTLE_MS = 300;  // 詳細ページ: 0.3秒間隔（15分で約2000件処理可能）
 
 export default async function handler(request: Request) {
   const url = new URL(request.url);
@@ -71,18 +72,20 @@ export default async function handler(request: Request) {
 
     logInfo(`[scrape-background] Using connector: ${connector.name}`);
 
-    // 4. 検索実行（最大50ページ）
+    // 4. 検索実行（最大100ページ）
     const searchConfig: SearchParams = {
       areas: targetAreas,
       propertyTypes: [],
       maxPages: MAX_PAGES,
     };
 
+    logInfo(`[scrape-background] Starting search with maxPages=${MAX_PAGES}`);
     const candidates = await connector.search(searchConfig);
     logInfo(`[scrape-background] Found ${candidates.length} candidates`);
 
-    // 5. 詳細取得（最大500件）
+    // 5. 詳細取得（最大2000件）
     const candidatesToProcess = candidates.slice(0, MAX_DETAILS);
+    logInfo(`[scrape-background] Processing ${candidatesToProcess.length} items (throttle: ${DETAIL_THROTTLE_MS}ms)`);
 
     for (const candidate of candidatesToProcess) {
       results.processed++;
@@ -120,10 +123,10 @@ export default async function handler(request: Request) {
 
         // 進捗ログ（100件ごと）
         if (results.processed % 100 === 0) {
-          logInfo(`[scrape-background] Progress: ${results.processed}/${candidatesToProcess.length}`);
+          logInfo(`[scrape-background] Progress: ${results.processed}/${candidatesToProcess.length}, inserted: ${results.inserted}`);
         }
 
-        await throttle(THROTTLE_MS);
+        await throttle(DETAIL_THROTTLE_MS);
       } catch (error) {
         results.errors.push(String(error));
         logError(`[scrape-background] Error: ${candidate.url}`, { error: String(error) });

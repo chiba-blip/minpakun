@@ -80,7 +80,7 @@ export class AthomeConnector implements Connector {
           }
 
           candidates.push(...pageResults);
-          await throttle(2000);
+          await throttle(1500); // 検索ページは1.5秒間隔
         } catch (error) {
           logError(`[${this.key}] Search error at page ${page}`, { error: String(error) });
           break;
@@ -156,7 +156,7 @@ export class AthomeConnector implements Connector {
       raw: { url, scraped_at: new Date().toISOString() },
     };
 
-    await throttle(1500);
+    // スロットリングはBackground Function側で制御
     return detail;
   }
 

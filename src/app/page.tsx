@@ -127,7 +127,7 @@ export default function DashboardPage() {
   }
 
   async function scrapeBulk(siteKey: string, siteName: string) {
-    if (!confirm(`${siteName}から大量の物件を取得します（最大500件、約15分）。\n\nバックグラウンドで処理されるため、ページを閉じても処理は継続します。\n\n実行しますか？`)) {
+    if (!confirm(`${siteName}から大量の物件を取得します（最大2000件、約15分）。\n\nバックグラウンドで処理されるため、ページを閉じても処理は継続します。\n\n実行しますか？`)) {
       return;
     }
     
@@ -238,7 +238,7 @@ export default function DashboardPage() {
             大量スクレイピング
           </CardTitle>
           <CardDescription>
-            バックグラウンドで最大500件の物件を取得（約15分）
+            バックグラウンドで最大2000件の物件を取得（約15分）
           </CardDescription>
         </CardHeader>
         <CardContent>
