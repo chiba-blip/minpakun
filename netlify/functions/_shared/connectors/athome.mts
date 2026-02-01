@@ -33,15 +33,16 @@ export class AthomeConnector implements Connector {
 
   /**
    * 検索URLを構築
+   * アットホームのページネーション形式: /list/page2/, /list/page3/...
    */
   private buildSearchUrl(params: SearchParams, propertyType: string, page: number = 1): string {
     const typePath = PROPERTY_TYPE_PATHS[propertyType] || 'kodate/chuko';
     
     let url = `${this.baseUrl}/${typePath}/hokkaido/list/`;
     
-    // ページ指定
+    // ページ指定（page2以降は /list/pageX/ 形式）
     if (page > 1) {
-      url += `?page=${page}`;
+      url += `page${page}/`;
     }
     
     return url;
@@ -223,17 +224,26 @@ export class AthomeConnector implements Connector {
   }
 
   private extractAddress(html: string): string | null {
+    // アットホームの住所パターン: 「所在地」の後に「北海道...」
     const patterns = [
+      /所在地[^北海道]*北海道([^<\|]+)/i,
       /所在地[：:\s]*<[^>]*>([^<]+)</,
       /所在地[：:\s]*([^<\n]+)/,
       /住所[：:\s]*([^<\n]+)/,
-      /北海道[^\s<]+[市町村区][^\s<]*/,
+      /北海道[^\s,<\|]+市[^\s,<\|]+/,
+      /北海道[^\s,<\|]+町[^\s,<\|]*/,
+      /北海道[^\s,<\|]+村[^\s,<\|]*/,
     ];
     
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) {
-        return match[1]?.trim() || match[0]?.trim();
+        // 「所在地」を含む場合は「北海道」を先頭に追加
+        const addr = match[1]?.trim() || match[0]?.trim();
+        if (addr && !addr.startsWith('北海道') && patterns.indexOf(pattern) === 0) {
+          return `北海道${addr}`;
+        }
+        return addr;
       }
     }
     return null;

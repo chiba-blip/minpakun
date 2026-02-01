@@ -15,6 +15,10 @@
   node_bundler = "esbuild"
   directory = "netlify/functions"
 
+# Background Function - 大量スクレイピング用（最大15分）
+[functions."scrape-background"]
+  timeout = 900  # 15分
+
 # Scheduled Functions
 [functions."jobs-scrape"]
   schedule = "0 */6 * * *"  # 6時間ごと（0, 6, 12, 18時）
