@@ -5,11 +5,11 @@
  * 呼び出し: POST /.netlify/functions/scrape-background?site=athome
  */
 import type { Config } from '@netlify/functions';
-import { getSupabaseAdmin } from './_shared/supabase';
-import { getConnector } from './_shared/connectors/index';
-import type { SearchParams, NormalizedListing } from './_shared/connectors/types';
-import { logInfo, logError } from './_shared/log';
-import { throttle } from './_shared/http';
+import { getSupabaseAdmin } from './_shared/supabase.mts';
+import { getConnector } from './_shared/connectors/index.mts';
+import type { SearchParams, NormalizedListing } from './_shared/connectors/types.mts';
+import { logInfo, logError } from './_shared/log.mts';
+import { throttle } from './_shared/http.mts';
 
 // Background Function設定
 export const config: Config = {
