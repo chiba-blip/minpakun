@@ -157,9 +157,15 @@ export async function POST(request: NextRequest) {
     results.message = `${results.simulated}件のシミュレーションを完了しました`;
     return NextResponse.json(results);
   } catch (error) {
-    console.error('Simulate job failed:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Simulate job failed:', errorMessage, errorStack);
     return NextResponse.json(
-      { error: String(error), ...results },
+      { 
+        error: errorMessage,
+        stack: errorStack,
+        ...results 
+      },
       { status: 500 }
     );
   }

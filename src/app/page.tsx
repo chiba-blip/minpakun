@@ -63,14 +63,17 @@ export default function DashboardPage() {
       });
       const result = await res.json();
       
-      if (result.message) {
+      if (!res.ok) {
+        const errorDetail = result.error || 'Unknown error';
+        alert(`${job}の実行に失敗しました: ${errorDetail}`);
+      } else if (result.message) {
         alert(result.message);
       }
       
       await fetchStats();
     } catch (error) {
       console.error(`Failed to trigger ${job}:`, error);
-      alert(`${job}の実行に失敗しました`);
+      alert(`${job}の実行に失敗しました: ${error}`);
     } finally {
       setTriggering(null);
     }
