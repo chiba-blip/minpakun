@@ -226,14 +226,23 @@ function runHeuristicsSimulation(
   const areaKey = Object.keys(AREA_DEFAULTS).find(k => city.includes(k)) || 'default';
   const areaDefaults = AREA_DEFAULTS[areaKey];
 
-  const isApartment = property.property_type?.includes('集合');
-  const rooms = property.rooms || (isApartment ? 6 : 1);
-  const bedrooms = isApartment ? rooms : Math.max(1, Math.floor((property.building_area || 100) / 30));
+  // 集合住宅判定（アパート、マンション、集合住宅）
+  const isApartment = property.property_type?.includes('集合') ||
+                      property.property_type?.includes('アパート') ||
+                      property.property_type?.includes('マンション');
+  
+  // 戸数: 集合住宅の場合のみ rooms を戸数として使用、一戸建ては常に1
+  const units = isApartment ? (property.rooms || 6) : 1;
+  
+  // 1戸あたりのbedrooms推定（建物面積から）
+  const buildingArea = property.building_area || 80;
+  const areaPerUnit = isApartment && units > 1 ? buildingArea / units : buildingArea;
+  const bedrooms = Math.max(1, Math.ceil(areaPerUnit / 40));
   
   const bedroomMultiplier = 1 + (bedrooms - 1) * 0.3;
   const baseAdr = Math.round(areaDefaults.adr * bedroomMultiplier);
   const baseOccupancy = areaDefaults.occupancy;
-  const avgStay = 2.2;
+  const avgStay = 2.5;
 
   const scenarios = ['NEGATIVE', 'NEUTRAL', 'POSITIVE'];
   const results: SimulationResult[] = [];
@@ -255,20 +264,25 @@ function runHeuristicsSimulation(
       const daysInMonth = DAYS_IN_MONTH[month];
       const booked_nights = Math.round(daysInMonth * (occupancy_rate / 100));
       const reservations = Math.max(1, Math.round(booked_nights / avgStay));
-      const revenue = booked_nights * nightly_rate * rooms;
+      // 1戸あたりの売上を計算し、戸数を掛ける（一戸建ては units=1）
+      const revenuePerUnit = booked_nights * nightly_rate;
+      const revenue = revenuePerUnit * units;
+
+      // 集合住宅の場合は予約数も戸数分
+      const totalReservationsMonth = reservations * units;
 
       monthlies.push({
         month,
         nightly_rate,
         occupancy_rate: Math.round(occupancy_rate * 100) / 100,
         booked_nights,
-        reservations,
+        reservations: totalReservationsMonth,
         avg_stay: avgStay,
         revenue,
       });
 
       annualRevenue += revenue;
-      totalReservations += reservations;
+      totalReservations += totalReservationsMonth;
     }
 
     // コスト計算
@@ -288,7 +302,8 @@ function runHeuristicsSimulation(
       annual_profit: annualProfit,
       assumptions: {
         bedrooms,
-        rooms,
+        units,
+        area_per_unit: areaPerUnit,
         base_adr: baseAdr,
         base_occupancy: baseOccupancy,
         avg_stay: avgStay,
