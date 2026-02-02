@@ -2,40 +2,47 @@
  * AirROI API クライアント
  * 
  * 民泊類似物件の売上推計を取得
- * https://airroi.com/api-docs
+ * https://www.airroi.com/api/documentation
  */
 
-const AIRROI_BASE_URL = 'https://api.airroi.com/v1';
+const AIRROI_BASE_URL = 'https://api.airroi.com';
 
 interface AirROIConfig {
   apiKey: string;
 }
 
-interface Comparable {
-  listing_id: string;
-  title: string;
-  bedrooms: number;
-  guests: number;
-  distance_km: number;
-  nightly_rate: number;
+// 類似物件レスポンスの型
+interface ComparableListing {
+  listing_info: {
+    listing_id: number;
+    listing_name: string;
+  };
+  property_details: {
+    bedrooms: number;
+    guests: number;
+    baths: number;
+  };
+  performance_metrics: {
+    ttm_revenue: number;
+    ttm_avg_rate: number;
+    ttm_occupancy: number;
+  };
 }
 
 interface ComparablesResponse {
-  comparables: Comparable[];
-  total: number;
+  listings: ComparableListing[];
 }
 
+// 月次メトリクスレスポンスの型
 interface MonthlyMetric {
-  month: string; // "2025-01"
+  date: string; // "2024-01"
   revenue: number;
-  occupancy: number; // 0-100
-  adr: number;
-  booked_nights: number;
+  occupancy: number; // 0-1
+  average_daily_rate: number;
 }
 
 interface MetricsResponse {
-  listing_id: string;
-  metrics: MonthlyMetric[];
+  results: MonthlyMetric[];
 }
 
 export class AirROIClient {
@@ -50,27 +57,28 @@ export class AirROIClient {
 
   /**
    * 類似物件（Comparables）を取得
+   * ドキュメント: GET /listings/comparables
    */
   async getComparables(params: {
     lat: number;
     lng: number;
     bedrooms: number;
+    baths: number;
     guests: number;
-    radius_km?: number;
-    limit?: number;
   }): Promise<ComparablesResponse> {
     const url = new URL(`${AIRROI_BASE_URL}/listings/comparables`);
-    url.searchParams.set('lat', params.lat.toString());
-    url.searchParams.set('lng', params.lng.toString());
+    url.searchParams.set('latitude', params.lat.toString());
+    url.searchParams.set('longitude', params.lng.toString());
     url.searchParams.set('bedrooms', params.bedrooms.toString());
+    url.searchParams.set('baths', params.baths.toString());
     url.searchParams.set('guests', params.guests.toString());
-    if (params.radius_km) url.searchParams.set('radius_km', params.radius_km.toString());
-    if (params.limit) url.searchParams.set('limit', params.limit.toString());
+    url.searchParams.set('currency', 'native');
+
+    console.log(`[AirROI] Fetching comparables: ${url.toString()}`);
 
     const res = await fetch(url.toString(), {
       headers: {
         'X-API-KEY': this.apiKey,
-        'Content-Type': 'application/json',
       },
     });
 
@@ -83,17 +91,18 @@ export class AirROIClient {
   }
 
   /**
-   * 複数物件の月次メトリクスを一括取得
+   * 物件の月次メトリクスを取得
+   * ドキュメント: GET /listings/metrics/all
    */
-  async getMetricsBulk(listingIds: string[], numMonths: number = 12): Promise<MetricsResponse[]> {
+  async getListingMetrics(listingId: number, numMonths: number = 12): Promise<MetricsResponse> {
     const url = new URL(`${AIRROI_BASE_URL}/listings/metrics/all`);
-    url.searchParams.set('listing_ids', listingIds.join(','));
+    url.searchParams.set('id', listingId.toString());
     url.searchParams.set('num_months', numMonths.toString());
+    url.searchParams.set('currency', 'native');
 
     const res = await fetch(url.toString(), {
       headers: {
         'X-API-KEY': this.apiKey,
-        'Content-Type': 'application/json',
       },
     });
 
@@ -103,6 +112,29 @@ export class AirROIClient {
     }
 
     return res.json();
+  }
+
+  /**
+   * 複数物件の月次メトリクスを取得（順次処理）
+   */
+  async getMetricsBulk(listingIds: number[], numMonths: number = 12): Promise<MetricsResponse[]> {
+    const results: MetricsResponse[] = [];
+    
+    // 最大10件まで取得（API負荷を考慮）
+    const idsToFetch = listingIds.slice(0, 10);
+    
+    for (const id of idsToFetch) {
+      try {
+        const metrics = await this.getListingMetrics(id, numMonths);
+        results.push(metrics);
+        // APIレート制限を考慮
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (error) {
+        console.warn(`[AirROI] Failed to get metrics for listing ${id}:`, error);
+      }
+    }
+    
+    return results;
   }
 }
 
@@ -152,23 +184,22 @@ export function aggregateMonthlyMetrics(
     revenues: number[];
     occupancies: number[];
     adrs: number[];
-    bookedNights: number[];
   }> = {};
 
   // 1-12月を初期化
   for (let m = 1; m <= 12; m++) {
-    monthlyData[m] = { revenues: [], occupancies: [], adrs: [], bookedNights: [] };
+    monthlyData[m] = { revenues: [], occupancies: [], adrs: [] };
   }
 
   for (const response of metricsResponses) {
-    for (const metric of response.metrics) {
-      // "2025-01" から月を抽出
-      const monthNum = parseInt(metric.month.split('-')[1], 10);
+    for (const metric of response.results) {
+      // "2024-01" から月を抽出
+      const monthNum = parseInt(metric.date.split('-')[1], 10);
       if (monthNum >= 1 && monthNum <= 12) {
         monthlyData[monthNum].revenues.push(metric.revenue);
-        monthlyData[monthNum].occupancies.push(metric.occupancy);
-        monthlyData[monthNum].adrs.push(metric.adr);
-        monthlyData[monthNum].bookedNights.push(metric.booked_nights);
+        // occupancyは0-1形式なので100倍して%に変換
+        monthlyData[monthNum].occupancies.push(metric.occupancy * 100);
+        monthlyData[monthNum].adrs.push(metric.average_daily_rate);
       }
     }
   }
@@ -197,7 +228,10 @@ export function aggregateMonthlyMetrics(
     const avgRevenue = data.revenues.reduce((a, b) => a + b, 0) / n;
     const avgOccupancy = data.occupancies.reduce((a, b) => a + b, 0) / n;
     const avgAdr = data.adrs.reduce((a, b) => a + b, 0) / n;
-    const avgBookedNights = data.bookedNights.reduce((a, b) => a + b, 0) / n;
+    
+    // 稼働泊数を計算
+    const daysInMonth = DAYS_IN_MONTH[month];
+    const avgBookedNights = (avgOccupancy / 100) * daysInMonth;
 
     // 中央値
     const sortedRevenues = [...data.revenues].sort((a, b) => a - b);

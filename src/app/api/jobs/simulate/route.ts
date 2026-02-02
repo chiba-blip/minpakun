@@ -352,7 +352,7 @@ async function runAirROISimulation(
   }
   const { lat, lng } = geoResult;
 
-  // 2. 建物面積から bedrooms/guests を推定
+  // 2. 建物面積から bedrooms/guests/baths を推定
   const isApartment = property.property_type?.includes('集合') || 
                       property.property_type?.includes('アパート') ||
                       property.property_type?.includes('マンション');
@@ -364,27 +364,34 @@ async function runAirROISimulation(
     isApartment,
     units
   );
+  
+  // baths推定: bedrooms数に基づいて（1~2bedroomsは1、3以上は1.5~2）
+  const baths = bedrooms <= 2 ? 1 : Math.min(bedrooms - 1, 3);
 
   // 3. AirROI /listings/comparables で類似物件を取得
   const airroiClient = new AirROIClient();
+  console.log(`[simulate] Calling AirROI with lat=${lat}, lng=${lng}, bedrooms=${bedrooms}, baths=${baths}, guests=${guests}`);
+  
   const comparablesResponse = await airroiClient.getComparables({
     lat,
     lng,
     bedrooms,
+    baths,
     guests,
-    radius_km: 10,
-    limit: 30,
   });
 
-  if (comparablesResponse.comparables.length === 0) {
+  if (!comparablesResponse.listings || comparablesResponse.listings.length === 0) {
     throw new Error('類似物件が見つかりませんでした');
   }
+  
+  console.log(`[simulate] Found ${comparablesResponse.listings.length} comparable listings`);
 
-  // 4. 上位20件の listing_id で月次メトリクスを取得
-  const topComps = comparablesResponse.comparables.slice(0, 20);
-  const listingIds = topComps.map(c => c.listing_id);
+  // 4. 上位10件の listing_id で月次メトリクスを取得
+  const topComps = comparablesResponse.listings.slice(0, 10);
+  const listingIds = topComps.map(c => c.listing_info.listing_id);
   
   const metricsResponses = await airroiClient.getMetricsBulk(listingIds, 12);
+  console.log(`[simulate] Got metrics for ${metricsResponses.length} listings`);
 
   // 5. 月次データを集約
   const aggregatedMonthly = aggregateMonthlyMetrics(metricsResponses);
