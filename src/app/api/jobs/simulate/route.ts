@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
           land_area,
           rooms,
           property_type,
-          city
+          city,
+          address_raw
         )
       `)
       .not('property_id', 'is', null)
@@ -95,17 +96,21 @@ export async function POST(request: NextRequest) {
       try {
         let simResults: SimulationResult[];
 
+        console.log(`[simulate] Processing property ${property.id}, address_raw: ${property.address_raw}, hasAirROIKey: ${hasAirROIKey}`);
+
         // AirROI APIが使用可能な場合は優先使用
         if (hasAirROIKey && property.address_raw) {
           try {
             simResults = await runAirROISimulation(property, costs);
-            console.log(`[simulate] AirROI used for property ${property.id}`);
+            console.log(`[simulate] AirROI successfully used for property ${property.id}`);
           } catch (airroiError) {
-            console.warn(`[simulate] AirROI failed, falling back to heuristics: ${airroiError}`);
+            const errorMessage = airroiError instanceof Error ? airroiError.message : String(airroiError);
+            console.error(`[simulate] AirROI failed for property ${property.id}: ${errorMessage}`);
             simResults = runHeuristicsSimulation(property, costs);
           }
         } else {
           // ヒューリスティクスにフォールバック
+          console.log(`[simulate] Using heuristics (address_raw: ${!!property.address_raw}, hasAirROIKey: ${hasAirROIKey})`);
           simResults = runHeuristicsSimulation(property, costs);
         }
 
