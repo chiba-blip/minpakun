@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
+import { geocodeAddress } from '@/lib/geo';
+import { 
+  AirROIClient, 
+  estimateBedroomsAndGuests, 
+  aggregateMonthlyMetrics,
+  calculateBookingMetrics,
+  DAYS_IN_MONTH,
+} from '@/lib/airroi';
 
 /**
  * シミュレーションジョブ
- * 新規リスティングに対して3シナリオのシミュレーションを実行
+ * AirROI APIで類似物件データを取得し、3シナリオのシミュレーションを実行
  */
 // デフォルトのコスト設定
 const DEFAULT_COST_CONFIG = {
@@ -12,6 +20,9 @@ const DEFAULT_COST_CONFIG = {
   management_fee_rate: 20,
   other_cost_rate: 5,
 };
+
+// AirROI APIが使用可能かチェック
+const hasAirROIKey = !!process.env.AIRROI_API_KEY;
 
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServer();
@@ -82,8 +93,21 @@ export async function POST(request: NextRequest) {
       if (!property) continue;
 
       try {
-        // シミュレーション実行（ヒューリスティクス）
-        const simResults = runHeuristicsSimulation(property, costs);
+        let simResults: SimulationResult[];
+
+        // AirROI APIが使用可能な場合は優先使用
+        if (hasAirROIKey && property.address_raw) {
+          try {
+            simResults = await runAirROISimulation(property, costs);
+            console.log(`[simulate] AirROI used for property ${property.id}`);
+          } catch (airroiError) {
+            console.warn(`[simulate] AirROI failed, falling back to heuristics: ${airroiError}`);
+            simResults = runHeuristicsSimulation(property, costs);
+          }
+        } else {
+          // ヒューリスティクスにフォールバック
+          simResults = runHeuristicsSimulation(property, costs);
+        }
 
         for (const sim of simResults) {
           const { data: insertedSim, error: simError } = await supabase
@@ -154,10 +178,7 @@ interface SimulationResult {
   monthlies: MonthlyData[];
 }
 
-const DAYS_IN_MONTH: Record<number, number> = {
-  1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
-  7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31,
-};
+// DAYS_IN_MONTH は airroi.ts からインポート
 
 const AREA_DEFAULTS: Record<string, { adr: number; occupancy: number }> = {
   'ニセコ町': { adr: 35000, occupancy: 55 },
@@ -273,6 +294,162 @@ function runHeuristicsSimulation(
         avg_stay: avgStay,
         data_source: 'heuristics',
         scenario_adjustment: adjustment,
+        costs: {
+          cleaning_fee_per_reservation: costs.cleaning_fee_per_reservation,
+          ota_fee_rate: costs.ota_fee_rate,
+          management_fee_rate: costs.management_fee_rate,
+          other_cost_rate: costs.other_cost_rate,
+          cleaning_cost: cleaningCost,
+          ota_fee: otaFee,
+          management_fee: managementFee,
+          other_cost: otherCost,
+          total_cost: totalCost,
+        },
+      },
+    });
+  }
+
+  return results;
+}
+
+/**
+ * AirROI APIを使用したシミュレーション
+ */
+async function runAirROISimulation(
+  property: {
+    id?: string;
+    address_raw: string | null;
+    building_area: number | null;
+    rooms: number | null;
+    property_type: string | null;
+    city: string | null;
+  },
+  costs: CostConfig
+): Promise<SimulationResult[]> {
+  if (!property.address_raw) {
+    throw new Error('住所がありません');
+  }
+
+  // 1. ジオコードで lat/lng を取得
+  const geoResult = await geocodeAddress(property.address_raw);
+  if (!geoResult) {
+    throw new Error('ジオコーディングに失敗しました');
+  }
+  const { lat, lng } = geoResult;
+
+  // 2. 建物面積から bedrooms/guests を推定
+  const isApartment = property.property_type?.includes('集合') || 
+                      property.property_type?.includes('アパート') ||
+                      property.property_type?.includes('マンション');
+  const units = isApartment ? (property.rooms || 1) : 1;
+  const buildingArea = property.building_area || 80;
+  
+  const { bedrooms, guests, areaPerUnit } = estimateBedroomsAndGuests(
+    buildingArea,
+    isApartment,
+    units
+  );
+
+  // 3. AirROI /listings/comparables で類似物件を取得
+  const airroiClient = new AirROIClient();
+  const comparablesResponse = await airroiClient.getComparables({
+    lat,
+    lng,
+    bedrooms,
+    guests,
+    radius_km: 10,
+    limit: 30,
+  });
+
+  if (comparablesResponse.comparables.length === 0) {
+    throw new Error('類似物件が見つかりませんでした');
+  }
+
+  // 4. 上位20件の listing_id で月次メトリクスを取得
+  const topComps = comparablesResponse.comparables.slice(0, 20);
+  const listingIds = topComps.map(c => c.listing_id);
+  
+  const metricsResponses = await airroiClient.getMetricsBulk(listingIds, 12);
+
+  // 5. 月次データを集約
+  const aggregatedMonthly = aggregateMonthlyMetrics(metricsResponses);
+
+  // 6. 3シナリオでシミュレーション結果を作成
+  const scenarios = ['NEGATIVE', 'NEUTRAL', 'POSITIVE'];
+  const results: SimulationResult[] = [];
+  const avgStay = 2.5;
+
+  for (const scenario of scenarios) {
+    // シナリオ調整: NEGATIVE -10%, NEUTRAL 0%, POSITIVE +10%
+    const adjustment = scenario === 'NEGATIVE' ? -10 : scenario === 'POSITIVE' ? 10 : 0;
+    const adjustmentMultiplier = 1 + adjustment / 100;
+
+    const monthlies: MonthlyData[] = [];
+    let annualRevenue = 0;
+    let totalReservations = 0;
+
+    for (const monthly of aggregatedMonthly) {
+      const daysInMonth = DAYS_IN_MONTH[monthly.month];
+      
+      // NEUTRAL は中央値ベース
+      const baseRevenue = monthly.medianRevenue;
+      const revenue = Math.round(baseRevenue * adjustmentMultiplier);
+      
+      // 稼働率と稼働泊数
+      const occupancy_rate = Math.round(monthly.avgOccupancy * adjustmentMultiplier * 10) / 10;
+      const { bookedNights, reservations } = calculateBookingMetrics(
+        occupancy_rate,
+        daysInMonth,
+        avgStay
+      );
+
+      // ADR（1泊あたり単価）
+      const nightly_rate = bookedNights > 0 
+        ? Math.round(revenue / bookedNights) 
+        : Math.round(monthly.avgAdr * adjustmentMultiplier);
+
+      // 集合住宅の場合は戸数を掛ける
+      const unitRevenue = revenue * units;
+
+      monthlies.push({
+        month: monthly.month,
+        nightly_rate,
+        occupancy_rate,
+        booked_nights: bookedNights,
+        reservations,
+        avg_stay: avgStay,
+        revenue: unitRevenue,
+      });
+
+      annualRevenue += unitRevenue;
+      totalReservations += reservations * units;
+    }
+
+    // コスト計算
+    const cleaningCost = totalReservations * costs.cleaning_fee_per_reservation;
+    const otaFee = Math.round(annualRevenue * (costs.ota_fee_rate / 100));
+    const managementFee = Math.round(annualRevenue * (costs.management_fee_rate / 100));
+    const otherCost = Math.round(annualRevenue * (costs.other_cost_rate / 100));
+    const totalCost = cleaningCost + otaFee + managementFee + otherCost;
+    
+    const annualProfit = annualRevenue - totalCost;
+
+    results.push({
+      scenario,
+      monthlies,
+      annual_revenue: annualRevenue,
+      annual_profit: annualProfit,
+      assumptions: {
+        lat,
+        lng,
+        bedrooms,
+        guests,
+        units,
+        area_per_unit: areaPerUnit,
+        comparables_count: topComps.length,
+        data_source: 'airroi',
+        scenario_adjustment: adjustment,
+        avg_stay: avgStay,
         costs: {
           cleaning_fee_per_reservation: costs.cleaning_fee_per_reservation,
           ota_fee_rate: costs.ota_fee_rate,
