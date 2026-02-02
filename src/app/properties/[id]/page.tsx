@@ -346,27 +346,34 @@ export default function PropertyDetailPage() {
                     </div>
 
                     {/* データソース情報 */}
-                    <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">データソース: </span>
-                        <Badge variant={sim.assumptions?.data_source === 'airroi' ? 'default' : 'secondary'}>
-                          {sim.assumptions?.data_source === 'airroi' ? 'AirROI API' : 
-                           sim.assumptions?.data_source === 'airdna' ? 'AirDNA API' : 'ヒューリスティクス（簡易計算）'}
-                        </Badge>
-                      </div>
-                      {sim.assumptions?.bedrooms && (
-                        <div>
-                          <span className="text-gray-500">推定bedrooms: </span>
-                          <span className="font-medium">{sim.assumptions.bedrooms as number}</span>
+                    {(() => {
+                      const dataSource = sim.assumptions?.data_source as string | undefined;
+                      const bedrooms = sim.assumptions?.bedrooms as number | undefined;
+                      const comparablesCount = sim.assumptions?.comparables_count as number | undefined;
+                      return (
+                        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-4 text-sm">
+                          <div>
+                            <span className="text-gray-500">データソース: </span>
+                            <Badge variant={dataSource === 'airroi' ? 'default' : 'secondary'}>
+                              {dataSource === 'airroi' ? 'AirROI API' : 
+                               dataSource === 'airdna' ? 'AirDNA API' : 'ヒューリスティクス（簡易計算）'}
+                            </Badge>
+                          </div>
+                          {bedrooms && (
+                            <div>
+                              <span className="text-gray-500">推定bedrooms: </span>
+                              <span className="font-medium">{bedrooms}</span>
+                            </div>
+                          )}
+                          {comparablesCount && (
+                            <div>
+                              <span className="text-gray-500">類似物件数: </span>
+                              <span className="font-medium">{comparablesCount}件</span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {sim.assumptions?.comparables_count && (
-                        <div>
-                          <span className="text-gray-500">類似物件数: </span>
-                          <span className="font-medium">{sim.assumptions.comparables_count as number}件</span>
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })()}
 
                     {/* コスト内訳 */}
                     {costs && (
