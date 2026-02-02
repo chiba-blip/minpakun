@@ -9,6 +9,33 @@ import { normalizeAddress, extractCity } from './normalize';
 // =============================================================================
 // 共通ユーティリティ
 // =============================================================================
+
+/**
+ * アットホーム専用の価格抽出
+ * 物件概要テーブル内の価格を優先的に取得
+ */
+function extractPriceAthome(html: string): number | null {
+  // アットホームの価格表示パターン（物件概要セクション）
+  // | 価格 | の後に表示される価格を取得
+  const athomePatterns = [
+    // テーブル内の価格（| 価格 | の後）
+    /\|\s*価格\s*\|[\s\S]*?([\d,]+)\s*万円/,
+    // 価格セクション直後
+    /価格[^>]*>[\s\S]*?([\d,]+)\s*万円/,
+    // シンプルな価格表示（最初の見出し付近）
+    /物件概要[\s\S]{0,500}?([\d,]+)\s*万円/,
+  ];
+  
+  for (const p of athomePatterns) {
+    const m = html.match(p);
+    if (m) {
+      const price = parseInt(m[1].replace(/,/g, ''), 10) * 10000;
+      if (price > 0 && price < 10000000000) return price;
+    }
+  }
+  return null;
+}
+
 function extractPrice(html: string): number | null {
   const patterns = [
     /([\d,]+)\s*万円/,
@@ -221,10 +248,13 @@ export class AthomeConnector implements Connector {
     if (!title) title = html.match(/<title>([^<]+)</i)?.[1]?.split('|')[0]?.trim();
     if (!title) title = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim();
     
+    // アットホーム専用の価格抽出（フォールバック付き）
+    const price = extractPriceAthome(html) || extractPrice(html);
+    
     return {
       url,
       title: title || '物件名不明',
-      price: extractPrice(html),
+      price,
       address_raw: address,
       building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
