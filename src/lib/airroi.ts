@@ -69,7 +69,7 @@ export class AirROIClient {
 
     const res = await fetch(url.toString(), {
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'X-API-KEY': this.apiKey,
         'Content-Type': 'application/json',
       },
     });
@@ -92,7 +92,7 @@ export class AirROIClient {
 
     const res = await fetch(url.toString(), {
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'X-API-KEY': this.apiKey,
         'Content-Type': 'application/json',
       },
     });
