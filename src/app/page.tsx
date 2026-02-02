@@ -127,33 +127,23 @@ export default function DashboardPage() {
   }
 
   async function scrapeBulk(siteKey: string, siteName: string) {
-    if (!confirm(`${siteName}から大量の物件を取得します（最大2000件、約15分）。\n\nバックグラウンドで処理されるため、ページを閉じても処理は継続します。\n\n実行しますか？`)) {
-      return;
-    }
-    
     setTriggering(`bulk-${siteKey}`);
     try {
-      // Background Functionを呼び出し（即座にレスポンスが返る）
       const res = await fetch(`/.netlify/functions/scrape-background?site=${siteKey}`, {
         method: 'POST',
       });
       
-      if (res.status === 202) {
-        // Background Functionは202を返して処理を続行
-        alert(`${siteName}の大量スクレイピングを開始しました。\n\nバックグラウンドで処理中です。\n数分後にページをリロードして結果を確認してください。`);
+      const result = await res.json();
+      if (result.success || result.inserted !== undefined) {
+        alert(`${siteName}: ${result.inserted || 0}件取得、${result.skipped || 0}件スキップ\n\n全データ取得には複数回実行してください。`);
       } else {
-        const result = await res.json();
-        if (result.success) {
-          alert(`${siteName}: ${result.inserted}件取得完了`);
-        } else {
-          alert(`${siteName}の取得に失敗: ${result.error || '不明なエラー'}`);
-        }
+        alert(`${siteName}の取得に失敗: ${result.error || '不明なエラー'}`);
       }
       
       await fetchStats();
     } catch (error) {
       console.error(`Failed to bulk scrape ${siteKey}:`, error);
-      alert(`${siteName}の大量取得を開始しました。バックグラウンドで処理中です。`);
+      alert(`${siteName}の取得に失敗しました`);
     } finally {
       setTriggering(null);
     }
@@ -230,15 +220,15 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 大量スクレイピング */}
+      {/* バッチスクレイピング */}
       <Card className="border-blue-200 bg-blue-50/50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Zap className="w-5 h-5 text-blue-600" />
-            大量スクレイピング
+            バッチスクレイピング
           </CardTitle>
           <CardDescription>
-            バックグラウンドで最大2000件の物件を取得（約15分）
+            1回で10件ずつ取得。全データ取得には複数回クリックしてください
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -261,7 +251,7 @@ export default function DashboardPage() {
             ))}
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            ※ バックグラウンド処理のため、ページを閉じても取得は継続します
+            ※ Netlify無料プランのため1回10件制限。何度もクリックして全件取得してください
           </p>
         </CardContent>
       </Card>

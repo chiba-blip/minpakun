@@ -11,16 +11,16 @@ import type { SearchParams, NormalizedListing } from './_shared/connectors/types
 import { logInfo, logError } from './_shared/log.mts';
 import { throttle } from './_shared/http.mts';
 
-// Background Function設定
+// Netlify Function設定
 export const config: Config = {
   path: '/.netlify/functions/scrape-background',
 };
 
-// 大量スクレイピング設定（15分で最大2000件処理可能）
-const MAX_PAGES = 100;    // 最大100ページ（1ページ30件 = 最大3000件の候補）
-const MAX_DETAILS = 2000; // 最大2000件の詳細取得
-const SEARCH_THROTTLE_MS = 1500; // 検索ページ: 1.5秒間隔
-const DETAIL_THROTTLE_MS = 300;  // 詳細ページ: 0.3秒間隔（15分で約2000件処理可能）
+// バッチ処理設定（Netlify無料プラン対応: 10秒以内で完了）
+// 1回の呼び出しで少量ずつ処理し、複数回実行で全データ取得
+const MAX_PAGES = 3;      // 1回のバッチで3ページ（約90件の候補）
+const MAX_DETAILS = 10;   // 1回のバッチで10件の詳細取得
+const DETAIL_THROTTLE_MS = 500;  // 0.5秒間隔
 
 export default async function handler(request: Request) {
   const url = new URL(request.url);
