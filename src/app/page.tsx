@@ -126,6 +126,33 @@ export default function DashboardPage() {
     }
   }
 
+  async function deleteAllSimulations() {
+    if (!confirm('全てのシミュレーション結果を削除しますか？物件データは残ります。')) {
+      return;
+    }
+    
+    setTriggering('delete-sim');
+    try {
+      const res = await fetch('/api/jobs/delete-simulations', {
+        method: 'POST',
+      });
+      const result = await res.json();
+      
+      if (result.success) {
+        alert(`${result.deleted}件のシミュレーションを削除しました`);
+      } else {
+        alert('削除に失敗しました: ' + (result.error || '不明なエラー'));
+      }
+      
+      await fetchStats();
+    } catch (error) {
+      console.error('Failed to delete simulations:', error);
+      alert('削除に失敗しました');
+    } finally {
+      setTriggering(null);
+    }
+  }
+
   async function scrapeBulk(siteKey: string, siteName: string) {
     setTriggering(`bulk-${siteKey}`);
     try {
@@ -317,6 +344,20 @@ export default function DashboardPage() {
                 <Play className="w-4 h-4 mr-2" />
               )}
               通知チェック実行
+            </Button>
+
+            <Button
+              onClick={deleteAllSimulations}
+              disabled={!!triggering}
+              variant="outline"
+              className="text-orange-600 border-orange-300 hover:bg-orange-50"
+            >
+              {triggering === 'delete-sim' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4 mr-2" />
+              )}
+              シミュレーション削除
             </Button>
 
             <Button
