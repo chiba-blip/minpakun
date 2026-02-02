@@ -16,14 +16,18 @@ import { normalizeAddress, extractCity } from './normalize';
  */
 function extractPriceAthome(html: string): number | null {
   // アットホームの価格表示パターン（物件概要セクション）
-  // | 価格 | の後に表示される価格を取得
+  // 「価格」ラベルの直後にある価格を取得
   const athomePatterns = [
-    // テーブル内の価格（| 価格 | の後）
-    /\|\s*価格\s*\|[\s\S]*?([\d,]+)\s*万円/,
-    // 価格セクション直後
-    /価格[^>]*>[\s\S]*?([\d,]+)\s*万円/,
-    // シンプルな価格表示（最初の見出し付近）
-    /物件概要[\s\S]{0,500}?([\d,]+)\s*万円/,
+    // テーブル: |価格|X万円 or 価格|X万円
+    /[|｜]\s*価格\s*[|｜]\s*[\n\r]*([\d,]+)\s*万円/,
+    // HTML: <th>価格</th><td>X万円</td> パターン
+    /価格<\/t[hd]>\s*<t[hd][^>]*>\s*([\d,]+)\s*万円/i,
+    // data属性やclass内の価格
+    /data-price[^>]*>([\d,]+)\s*万円/i,
+    // 価格クラス内
+    /class="[^"]*price[^"]*"[^>]*>([\d,]+)\s*万円/i,
+    // 単独で「価格」の直後
+    />価格[^<]*<[^>]*>([\d,]+)\s*万円/,
   ];
   
   for (const p of athomePatterns) {
