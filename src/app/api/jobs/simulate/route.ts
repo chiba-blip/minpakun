@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
-import { geocodeAddress } from '@/lib/geo';
+import { findNearestStation, geocodeAddress } from '@/lib/geo';
 import { 
   AirROIClient, 
   estimateBedroomsAndGuests, 
@@ -8,6 +8,59 @@ import {
   calculateBookingMetrics,
   DAYS_IN_MONTH,
 } from '@/lib/airroi';
+
+// ---------------------------------------------------------------------------
+// 物件特性による補正（簡易）
+// ---------------------------------------------------------------------------
+const LARGE_AREA_THRESHOLD_M2 = 80; // 「面積が大きい」判定（1戸あたり）
+const FAR_STATION_THRESHOLD_M = 1200; // 「駅から遠い」判定（直線距離）
+const LARGE_AREA_MULTIPLIER = 1.05; // +5%
+const FAR_STATION_MULTIPLIER = 0.95; // -5%
+
+const nearestStationCache = new Map<string, { name: string; distance_m: number } | null>();
+
+async function calculatePropertyRevenueAdjustment(params: {
+  buildingArea: number | null | undefined;
+  areaPerUnit: number;
+  lat: number;
+  lng: number;
+}): Promise<{
+  multiplier: number;
+  reasons: string[];
+  nearestStation: { name: string; distance_m: number } | null;
+}> {
+  const reasons: string[] = [];
+  let multiplier = 1;
+
+  // 面積が大きい → +5%
+  if (Number.isFinite(params.areaPerUnit) && params.areaPerUnit >= LARGE_AREA_THRESHOLD_M2) {
+    multiplier *= LARGE_AREA_MULTIPLIER;
+    reasons.push(`面積が大きい(+5%): ${Math.round(params.areaPerUnit)}㎡/戸`);
+  }
+
+  // 駅から遠い → -5%（Overpassで最寄駅を探す）
+  let nearestStation: { name: string; distance_m: number } | null = null;
+  try {
+    const cacheKey = `${params.lat.toFixed(4)},${params.lng.toFixed(4)}`;
+    if (nearestStationCache.has(cacheKey)) {
+      nearestStation = nearestStationCache.get(cacheKey) ?? null;
+    } else {
+      const s = await findNearestStation(params.lat, params.lng);
+      nearestStation = s ? { name: s.name, distance_m: s.distance_m } : null;
+      nearestStationCache.set(cacheKey, nearestStation);
+    }
+    if (nearestStation) {
+      if (nearestStation.distance_m >= FAR_STATION_THRESHOLD_M) {
+        multiplier *= FAR_STATION_MULTIPLIER;
+        reasons.push(`駅から遠い(-5%): ${nearestStation.name}まで約${Math.round(nearestStation.distance_m)}m`);
+      }
+    }
+  } catch (e) {
+    console.warn('[simulate] findNearestStation failed:', e);
+  }
+
+  return { multiplier, reasons, nearestStation };
+}
 
 /**
  * シミュレーションジョブ
@@ -106,12 +159,12 @@ export async function POST(request: NextRequest) {
           } catch (airroiError) {
             const errorMessage = airroiError instanceof Error ? airroiError.message : String(airroiError);
             console.error(`[simulate] AirROI failed for property ${property.id}: ${errorMessage}`);
-            simResults = runHeuristicsSimulation(property, costs);
+            simResults = await runHeuristicsSimulation(property, costs);
           }
         } else {
           // ヒューリスティクスにフォールバック
           console.log(`[simulate] Using heuristics (address_raw: ${!!property.address_raw}, hasAirROIKey: ${hasAirROIKey})`);
-          simResults = runHeuristicsSimulation(property, costs);
+          simResults = await runHeuristicsSimulation(property, costs);
         }
 
         for (const sim of simResults) {
@@ -224,15 +277,16 @@ interface CostConfig {
   other_cost_rate: number;
 }
 
-function runHeuristicsSimulation(
+async function runHeuristicsSimulation(
   property: {
+    address_raw?: string | null;
     building_area: number | null;
     rooms: number | null;
     property_type: string | null;
     city: string | null;
   },
   costs: CostConfig
-): SimulationResult[] {
+): Promise<SimulationResult[]> {
   const city = property.city || 'default';
   const areaKey = Object.keys(AREA_DEFAULTS).find(k => city.includes(k)) || 'default';
   const areaDefaults = AREA_DEFAULTS[areaKey];
@@ -258,6 +312,38 @@ function runHeuristicsSimulation(
   const scenarios = ['NEGATIVE', 'NEUTRAL', 'POSITIVE'];
   const results: SimulationResult[] = [];
 
+  // 物件特性補正（面積/駅距離）
+  let propertyMultiplier = 1;
+  let propertyAdjustmentReasons: string[] = [];
+  let nearestStation: { name: string; distance_m: number } | null = null;
+
+  // 面積補正だけは常に適用可
+  if (Number.isFinite(areaPerUnit) && areaPerUnit >= LARGE_AREA_THRESHOLD_M2) {
+    propertyMultiplier *= LARGE_AREA_MULTIPLIER;
+    propertyAdjustmentReasons.push(`面積が大きい(+5%): ${Math.round(areaPerUnit)}㎡/戸`);
+  }
+
+  // 駅距離補正（住所があればジオコード→最寄駅）
+  if (property.address_raw) {
+    try {
+      const geo = await geocodeAddress(property.address_raw);
+      if (geo) {
+        const adj = await calculatePropertyRevenueAdjustment({
+          buildingArea: property.building_area,
+          areaPerUnit,
+          lat: geo.lat,
+          lng: geo.lng,
+        });
+        // adjには面積補正も含まれるため、面積補正が二重にならないよう上書き
+        propertyMultiplier = adj.multiplier;
+        propertyAdjustmentReasons = adj.reasons;
+        nearestStation = adj.nearestStation;
+      }
+    } catch (e) {
+      console.warn('[simulate] heuristics station adjustment skipped:', e);
+    }
+  }
+
   for (const scenario of scenarios) {
     const adjustment = scenario === 'NEGATIVE' ? -10 : scenario === 'POSITIVE' ? 10 : 0;
     const adjustmentMultiplier = 1 + adjustment / 100;
@@ -269,7 +355,8 @@ function runHeuristicsSimulation(
     for (let month = 1; month <= 12; month++) {
       const season = SEASONALITY[month];
       
-      const nightly_rate = Math.round(baseAdr * season.adr * adjustmentMultiplier);
+      // 物件補正は主に単価（ADR）側に反映
+      const nightly_rate = Math.round(baseAdr * season.adr * adjustmentMultiplier * propertyMultiplier);
       const occupancy_rate = Math.min(100, baseOccupancy * season.occupancy * adjustmentMultiplier);
       
       const daysInMonth = DAYS_IN_MONTH[month];
@@ -320,6 +407,9 @@ function runHeuristicsSimulation(
         avg_stay: avgStay,
         data_source: 'heuristics',
         scenario_adjustment: adjustment,
+        revenue_adjustment_multiplier: propertyMultiplier,
+        revenue_adjustment_reasons: propertyAdjustmentReasons,
+        nearest_station: nearestStation,
         costs: {
           cleaning_fee_per_reservation: costs.cleaning_fee_per_reservation,
           ota_fee_rate: costs.ota_fee_rate,
@@ -379,6 +469,17 @@ async function runAirROISimulation(
   // baths推定: bedrooms数に基づいて（1~2bedroomsは1、3以上は1.5~2）
   const baths = bedrooms <= 2 ? 1 : Math.min(bedrooms - 1, 3);
 
+  // 2.5 物件特性補正（面積/駅距離）
+  const propertyAdj = await calculatePropertyRevenueAdjustment({
+    buildingArea: property.building_area,
+    areaPerUnit,
+    lat,
+    lng,
+  });
+  const propertyMultiplier = propertyAdj.multiplier;
+  const propertyAdjustmentReasons = propertyAdj.reasons;
+  const nearestStation = propertyAdj.nearestStation;
+
   // 3. AirROI /listings/comparables で類似物件を取得
   const airroiClient = new AirROIClient();
   console.log(`[simulate] Calling AirROI with lat=${lat}, lng=${lng}, bedrooms=${bedrooms}, baths=${baths}, guests=${guests}`);
@@ -426,7 +527,7 @@ async function runAirROISimulation(
       
       // NEUTRAL は中央値ベース
       const baseRevenue = monthly.medianRevenue;
-      const revenue = Math.round(baseRevenue * adjustmentMultiplier);
+      const revenue = Math.round(baseRevenue * adjustmentMultiplier * propertyMultiplier);
       
       // 稼働率と稼働泊数
       const occupancy_rate = Math.round(monthly.avgOccupancy * adjustmentMultiplier * 10) / 10;
@@ -439,7 +540,7 @@ async function runAirROISimulation(
       // ADR（1泊あたり単価）
       const nightly_rate = bookedNights > 0 
         ? Math.round(revenue / bookedNights) 
-        : Math.round(monthly.avgAdr * adjustmentMultiplier);
+        : Math.round(monthly.avgAdr * adjustmentMultiplier * propertyMultiplier);
 
       // 集合住宅の場合は戸数を掛ける
       const unitRevenue = revenue * units;
@@ -483,6 +584,9 @@ async function runAirROISimulation(
         data_source: 'airroi',
         scenario_adjustment: adjustment,
         avg_stay: avgStay,
+        revenue_adjustment_multiplier: propertyMultiplier,
+        revenue_adjustment_reasons: propertyAdjustmentReasons,
+        nearest_station: nearestStation,
         costs: {
           cleaning_fee_per_reservation: costs.cleaning_fee_per_reservation,
           ota_fee_rate: costs.ota_fee_rate,

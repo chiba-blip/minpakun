@@ -350,25 +350,50 @@ export default function PropertyDetailPage() {
                       const dataSource = sim.assumptions?.data_source as string | undefined;
                       const bedrooms = sim.assumptions?.bedrooms as number | undefined;
                       const comparablesCount = sim.assumptions?.comparables_count as number | undefined;
+                      const adjustmentMultiplier = sim.assumptions?.revenue_adjustment_multiplier as number | undefined;
+                      const adjustmentReasons = sim.assumptions?.revenue_adjustment_reasons as string[] | undefined;
+                      const nearestStation = sim.assumptions?.nearest_station as { name: string; distance_m: number } | undefined;
                       return (
-                        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-4 text-sm">
-                          <div>
-                            <span className="text-gray-500">データソース: </span>
-                            <Badge variant={dataSource === 'airroi' ? 'default' : 'secondary'}>
-                              {dataSource === 'airroi' ? 'AirROI API' : 
-                               dataSource === 'airdna' ? 'AirDNA API' : 'ヒューリスティクス（簡易計算）'}
-                            </Badge>
-                          </div>
-                          {bedrooms && (
+                        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                          <div className="flex flex-wrap items-center gap-4">
                             <div>
-                              <span className="text-gray-500">推定bedrooms: </span>
-                              <span className="font-medium">{bedrooms}</span>
+                              <span className="text-gray-500">データソース: </span>
+                              <Badge variant={dataSource === 'airroi' ? 'default' : 'secondary'}>
+                                {dataSource === 'airroi' ? 'AirROI API' : 
+                                 dataSource === 'airdna' ? 'AirDNA API' : 'ヒューリスティクス（簡易計算）'}
+                              </Badge>
                             </div>
-                          )}
-                          {comparablesCount && (
-                            <div>
-                              <span className="text-gray-500">類似物件数: </span>
-                              <span className="font-medium">{comparablesCount}件</span>
+                            {bedrooms && (
+                              <div>
+                                <span className="text-gray-500">推定bedrooms: </span>
+                                <span className="font-medium">{bedrooms}</span>
+                              </div>
+                            )}
+                            {comparablesCount && (
+                              <div>
+                                <span className="text-gray-500">類似物件数: </span>
+                                <span className="font-medium">{comparablesCount}件</span>
+                              </div>
+                            )}
+                            {typeof adjustmentMultiplier === 'number' && (
+                              <div>
+                                <span className="text-gray-500">補正倍率: </span>
+                                <span className="font-medium">{adjustmentMultiplier.toFixed(3)}倍</span>
+                              </div>
+                            )}
+                            {nearestStation?.name && typeof nearestStation.distance_m === 'number' && (
+                              <div>
+                                <span className="text-gray-500">最寄駅: </span>
+                                <span className="font-medium">
+                                  {nearestStation.name}（約{Math.round(nearestStation.distance_m)}m）
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {Array.isArray(adjustmentReasons) && adjustmentReasons.length > 0 && (
+                            <div className="mt-2 text-xs text-gray-600">
+                              <span className="text-gray-500">補正理由: </span>
+                              {adjustmentReasons.join(' / ')}
                             </div>
                           )}
                         </div>
