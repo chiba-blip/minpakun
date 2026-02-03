@@ -34,6 +34,8 @@ export interface ListingDetail {
   built_year: number | null;
   rooms: number | null;
   property_type: string | null;
+  nearest_station?: string | null;  // 交通情報（最寄駅・バス停など）
+  walk_minutes?: number | null;     // 徒歩分数
   images?: string[];
   description?: string;
   external_id?: string;
@@ -58,6 +60,8 @@ export interface NormalizedListing {
     built_year: number | null;
     rooms: number | null;
     property_type: string | null;
+    nearest_station?: string | null;  // 交通情報
+    walk_minutes?: number | null;     // 徒歩分数
   };
 }
 

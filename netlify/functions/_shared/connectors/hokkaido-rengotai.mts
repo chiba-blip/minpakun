@@ -188,6 +188,7 @@ export class HokkaidoRengotaiConnector implements Connector {
     logInfo(`[${this.key}] Fetching detail`, { url });
     
     const html = await fetchHtml(url);
+    const transportInfo = this.extractTransport(html);
     
     const detail: ListingDetail = {
       url,
@@ -199,6 +200,8 @@ export class HokkaidoRengotaiConnector implements Connector {
       built_year: this.extractBuiltYear(html),
       rooms: this.extractRooms(html),
       property_type: this.extractPropertyType(html, url),
+      nearest_station: transportInfo.text,
+      walk_minutes: transportInfo.walkMinutes,
       external_id: this.extractExternalId(url),
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -229,6 +232,8 @@ export class HokkaidoRengotaiConnector implements Connector {
         built_year: detail.built_year,
         rooms: detail.rooms,
         property_type: detail.property_type,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
       },
     };
   }
@@ -395,6 +400,44 @@ export class HokkaidoRengotaiConnector implements Connector {
       if (divText.includes('土地')) return '土地';
     }
     return '一戸建て';
+  }
+
+  /**
+   * 交通情報を抽出
+   * <span class="st_name">中央バス「祝津3丁目」停 </span>
+   * <span class="st_distance "><strong>徒歩1分</strong></span>
+   */
+  private extractTransport(html: string): { text: string | null; walkMinutes: number | null } {
+    // st_nameから駅名・バス停名を取得
+    const stationMatch = html.match(/<span class="st_name">([^<]+)<\/span>/i);
+    // st_distanceから徒歩分数を取得
+    const distanceMatch = html.match(/<span class="st_distance[^"]*">[\s\S]*?徒歩(\d+)分/i);
+    
+    if (stationMatch) {
+      const stationName = stationMatch[1].trim();
+      const walkMinutes = distanceMatch ? parseInt(distanceMatch[1], 10) : null;
+      
+      // 交通テキストを組み立て
+      let transportText = stationName;
+      if (walkMinutes !== null) {
+        transportText += ` 徒歩${walkMinutes}分`;
+      }
+      
+      return { text: transportText, walkMinutes };
+    }
+    
+    // フォールバック: th/tdパターン
+    const thTdMatch = html.match(/交通<\/th>[\s\S]*?<td[^>]*>([^<]+)</i);
+    if (thTdMatch && thTdMatch[1]) {
+      const text = thTdMatch[1].trim();
+      const walkMatch = text.match(/徒歩(\d+)分/);
+      return {
+        text,
+        walkMinutes: walkMatch ? parseInt(walkMatch[1], 10) : null,
+      };
+    }
+    
+    return { text: null, walkMinutes: null };
   }
 
   private extractExternalId(url: string): string | null {

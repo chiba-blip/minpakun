@@ -640,6 +640,8 @@ async function saveListing(
         built_year: listing.property.built_year,
         rooms: listing.property.rooms,
         property_type: listing.property.property_type,
+        nearest_station: listing.property.nearest_station,
+        walk_minutes: listing.property.walk_minutes,
       })
       .select('id')
       .single();
