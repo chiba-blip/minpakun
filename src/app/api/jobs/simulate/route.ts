@@ -315,7 +315,8 @@ async function runHeuristicsSimulation(
   const propertyAdjustmentReasons = adj.reasons;
 
   for (const scenario of scenarios) {
-    const adjustment = scenario === 'NEGATIVE' ? -10 : scenario === 'POSITIVE' ? 10 : 0;
+    // シナリオ調整: NEGATIVE -20%, NEUTRAL 0%, POSITIVE +10%
+    const adjustment = scenario === 'NEGATIVE' ? -20 : scenario === 'POSITIVE' ? 10 : 0;
     const adjustmentMultiplier = 1 + adjustment / 100;
 
     const monthlies: MonthlyData[] = [];
@@ -483,8 +484,8 @@ async function runAirROISimulation(
   const avgStay = 2.5;
 
   for (const scenario of scenarios) {
-    // シナリオ調整: NEGATIVE -10%, NEUTRAL 0%, POSITIVE +10%
-    const adjustment = scenario === 'NEGATIVE' ? -10 : scenario === 'POSITIVE' ? 10 : 0;
+    // シナリオ調整: NEGATIVE -20%, NEUTRAL 0%, POSITIVE +10%
+    const adjustment = scenario === 'NEGATIVE' ? -20 : scenario === 'POSITIVE' ? 10 : 0;
     const adjustmentMultiplier = 1 + adjustment / 100;
 
     const monthlies: MonthlyData[] = [];
@@ -553,6 +554,10 @@ async function runAirROISimulation(
         comparables: topComps.map(c => ({
           listing_id: c.listing_info.listing_id,
           listing_name: c.listing_info.listing_name,
+          locality: c.location_info?.locality || null,
+          district: c.location_info?.district || null,
+          latitude: c.location_info?.latitude || null,
+          longitude: c.location_info?.longitude || null,
           bedrooms: c.property_details.bedrooms,
           guests: c.property_details.guests,
           baths: c.property_details.baths,

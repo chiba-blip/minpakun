@@ -372,6 +372,10 @@ export default function PropertyDetailPage() {
                       interface ComparableInfo {
                         listing_id: number;
                         listing_name: string;
+                        locality: string | null;
+                        district: string | null;
+                        latitude: number | null;
+                        longitude: number | null;
                         bedrooms: number;
                         guests: number;
                         baths: number;
@@ -417,6 +421,21 @@ export default function PropertyDetailPage() {
                                     <div className="font-medium text-sm text-gray-800 truncate mb-2" title={comp.listing_name}>
                                       {comp.listing_name || `ID: ${comp.listing_id}`}
                                     </div>
+                                    {(comp.locality || comp.latitude) && (
+                                      <div className="text-xs text-gray-500 mb-2">
+                                        📍 {comp.locality}{comp.district ? ` ${comp.district}` : ''}
+                                        {comp.latitude && comp.longitude && (
+                                          <a 
+                                            href={`https://www.google.com/maps?q=${comp.latitude},${comp.longitude}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="ml-1 text-blue-500 hover:underline"
+                                          >
+                                            (地図)
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
                                     <div className="grid grid-cols-2 gap-1 text-xs text-gray-600">
                                       <div>寝室: {comp.bedrooms}</div>
                                       <div>定員: {comp.guests}人</div>

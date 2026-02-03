@@ -25,6 +25,14 @@ interface ComparableListing {
     listing_id: number;
     listing_name: string;
   };
+  location_info: {
+    country: string;
+    region: string;
+    locality: string;
+    district: string | null;
+    latitude: number;
+    longitude: number;
+  };
   property_details: {
     bedrooms: number;
     guests: number;
