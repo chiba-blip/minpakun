@@ -34,8 +34,6 @@ export async function GET(
           built_year,
           rooms,
           property_type,
-          nearest_station,
-          walk_minutes,
           lat,
           lng
         )
@@ -99,8 +97,8 @@ export async function GET(
         built_year: property.built_year,
         rooms: property.rooms,
         property_type: property.property_type,
-        nearest_station: property.nearest_station,
-        walk_minutes: property.walk_minutes,
+        nearest_station: property?.nearest_station ?? null,
+        walk_minutes: property?.walk_minutes ?? null,
         lat: property.lat,
         lng: property.lng,
       },
