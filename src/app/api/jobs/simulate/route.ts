@@ -45,7 +45,7 @@ const DEFAULT_COST_CONFIG = {
 // Netlify Proは26秒タイムアウトなので24秒に設定
 const DEFAULT_PAGE_SIZE = 200;
 const DEFAULT_TIME_BUDGET_MS = 24000;
-const MAX_COMPARABLES_FOR_METRICS = 5;
+const MAX_COMPARABLES_FOR_METRICS = 3;
 
 // AirROI APIが使用可能かチェック
 const hasAirROIKey = !!process.env.AIRROI_API_KEY;
