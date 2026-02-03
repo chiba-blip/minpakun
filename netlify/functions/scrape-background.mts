@@ -214,6 +214,11 @@ export default async function handler(request: Request) {
           
           logInfo(`[scrape-background] HTML length: ${html.length}, URL: ${searchUrl}`);
           
+          // 短いHTMLの場合は内容を確認
+          if (html.length < 50000) {
+            logInfo(`[scrape-background] Short HTML content: ${html.substring(0, 500).replace(/\s+/g, ' ')}`);
+          }
+          
           // 物件IDを抽出（複数のパターンを試す）
           const pattern1 = /\/kodate\/(\d{10})(?:\/|\?)/g;
           const pattern2 = /data-bukken-id="(\d+)"/g;
