@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
-import { findNearestStation, geocodeAddress } from '@/lib/geo';
+import { geocodeAddress } from '@/lib/geo';
 import { 
   AirROIClient, 
   estimateBedroomsAndGuests, 
@@ -13,22 +13,11 @@ import {
 // 物件特性による補正（簡易）
 // ---------------------------------------------------------------------------
 const LARGE_AREA_THRESHOLD_M2 = 80; // 「面積が大きい」判定（1戸あたり）
-const FAR_STATION_THRESHOLD_M = 1200; // 「駅から遠い」判定（直線距離）
 const LARGE_AREA_MULTIPLIER = 1.05; // +5%
-const FAR_STATION_MULTIPLIER = 0.95; // -5%
 
-const nearestStationCache = new Map<string, { name: string; distance_m: number } | null>();
-
-async function calculatePropertyRevenueAdjustment(params: {
-  buildingArea: number | null | undefined;
+function calculatePropertyRevenueAdjustment(params: {
   areaPerUnit: number;
-  lat: number;
-  lng: number;
-}): Promise<{
-  multiplier: number;
-  reasons: string[];
-  nearestStation: { name: string; distance_m: number } | null;
-}> {
+}): { multiplier: number; reasons: string[] } {
   const reasons: string[] = [];
   let multiplier = 1;
 
@@ -37,30 +26,7 @@ async function calculatePropertyRevenueAdjustment(params: {
     multiplier *= LARGE_AREA_MULTIPLIER;
     reasons.push(`面積が大きい(+5%): ${Math.round(params.areaPerUnit)}㎡/戸`);
   }
-
-  // 駅から遠い → -5%（Overpassで最寄駅を探す）
-  let nearestStation: { name: string; distance_m: number } | null = null;
-  try {
-    const cacheKey = `${params.lat.toFixed(4)},${params.lng.toFixed(4)}`;
-    if (nearestStationCache.has(cacheKey)) {
-      nearestStation = nearestStationCache.get(cacheKey) ?? null;
-    } else {
-      // サーバレスでのタイムアウト回避: 半径拡大なし・短めタイムアウト
-      const s = await findNearestStation(params.lat, params.lng, 20000, { expandRadii: false, timeoutMs: 4000 });
-      nearestStation = s ? { name: s.name, distance_m: s.distance_m } : null;
-      nearestStationCache.set(cacheKey, nearestStation);
-    }
-    if (nearestStation) {
-      if (nearestStation.distance_m >= FAR_STATION_THRESHOLD_M) {
-        multiplier *= FAR_STATION_MULTIPLIER;
-        reasons.push(`駅から遠い(-5%): ${nearestStation.name}まで約${Math.round(nearestStation.distance_m)}m`);
-      }
-    }
-  } catch (e) {
-    console.warn('[simulate] findNearestStation failed:', e);
-  }
-
-  return { multiplier, reasons, nearestStation };
+  return { multiplier, reasons };
 }
 
 /**
@@ -75,22 +41,29 @@ const DEFAULT_COST_CONFIG = {
   other_cost_rate: 5,
 };
 
-// Netlifyの実行時間制限対策: 1回の実行で処理する物件数を絞る
-const MAX_SIMULATIONS_PER_RUN = 3;
-// 取得する類似物件（comps）を絞る（API呼び出し回数/時間の削減）
-const MAX_COMPARABLES_FOR_METRICS = 5;
+// 大量処理前提: ページングしつつ1回の実行は時間内で打ち切る
+const DEFAULT_PAGE_SIZE = 200;
+const DEFAULT_TIME_BUDGET_MS = 8000;
+const MAX_COMPARABLES_FOR_METRICS = 10;
 
 // AirROI APIが使用可能かチェック
 const hasAirROIKey = !!process.env.AIRROI_API_KEY;
 
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServer();
+  const { searchParams } = new URL(request.url);
+  const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
+  const pageSize = Math.min(500, Math.max(1, parseInt(searchParams.get('pageSize') || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE));
+  const timeBudgetMs = Math.min(20000, Math.max(1000, parseInt(searchParams.get('timeBudgetMs') || String(DEFAULT_TIME_BUDGET_MS), 10) || DEFAULT_TIME_BUDGET_MS));
+  const startedAt = Date.now();
 
   const results = {
     processed: 0,
     simulated: 0,
     errors: [] as string[],
     message: '',
+    has_more: false,
+    next_offset: offset,
   };
 
   try {
@@ -103,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     const costs = costConfig || DEFAULT_COST_CONFIG;
 
-    // シミュレーション未実行のリスティングを取得
+    // リスティングをページング取得（大量件数前提）
     const { data: listings, error: listingsError } = await supabase
       .from('listings')
       .select(`
@@ -122,7 +95,7 @@ export async function POST(request: NextRequest) {
       `)
       .not('property_id', 'is', null)
       .order('scraped_at', { ascending: false })
-      .limit(100);
+      .range(offset, offset + pageSize - 1);
 
     if (listingsError) {
       throw new Error(`Failed to fetch listings: ${listingsError.message}`);
@@ -135,6 +108,12 @@ export async function POST(request: NextRequest) {
 
     for (const listing of listings) {
       results.processed++;
+      results.next_offset = offset + results.processed;
+
+      // タイムアウト回避: 時間内で打ち切り（次回offsetから続き）
+      if (Date.now() - startedAt > timeBudgetMs) {
+        break;
+      }
 
       // 既存シミュレーションをチェック
       const { data: existingSim } = await supabase
@@ -208,17 +187,13 @@ export async function POST(request: NextRequest) {
         }
 
         results.simulated++;
-
-        // タイムアウト回避: 一定件数で打ち切り、次回実行で続きを処理
-        if (results.simulated >= MAX_SIMULATIONS_PER_RUN) {
-          break;
-        }
       } catch (error) {
         results.errors.push(`エラー: ${error}`);
       }
     }
 
-    results.message = `${results.simulated}件のシミュレーションを完了しました（1回あたり最大${MAX_SIMULATIONS_PER_RUN}件）`;
+    results.has_more = listings.length === pageSize && results.processed === pageSize;
+    results.message = `${results.simulated}件のシミュレーションを完了しました（offset=${offset}, processed=${results.processed}, pageSize=${pageSize}）`;
     return NextResponse.json(results);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -323,37 +298,10 @@ async function runHeuristicsSimulation(
   const scenarios = ['NEGATIVE', 'NEUTRAL', 'POSITIVE'];
   const results: SimulationResult[] = [];
 
-  // 物件特性補正（面積/駅距離）
-  let propertyMultiplier = 1;
-  let propertyAdjustmentReasons: string[] = [];
-  let nearestStation: { name: string; distance_m: number } | null = null;
-
-  // 面積補正だけは常に適用可
-  if (Number.isFinite(areaPerUnit) && areaPerUnit >= LARGE_AREA_THRESHOLD_M2) {
-    propertyMultiplier *= LARGE_AREA_MULTIPLIER;
-    propertyAdjustmentReasons.push(`面積が大きい(+5%): ${Math.round(areaPerUnit)}㎡/戸`);
-  }
-
-  // 駅距離補正（住所があればジオコード→最寄駅）
-  if (property.address_raw) {
-    try {
-      const geo = await geocodeAddress(property.address_raw);
-      if (geo) {
-        const adj = await calculatePropertyRevenueAdjustment({
-          buildingArea: property.building_area,
-          areaPerUnit,
-          lat: geo.lat,
-          lng: geo.lng,
-        });
-        // adjには面積補正も含まれるため、面積補正が二重にならないよう上書き
-        propertyMultiplier = adj.multiplier;
-        propertyAdjustmentReasons = adj.reasons;
-        nearestStation = adj.nearestStation;
-      }
-    } catch (e) {
-      console.warn('[simulate] heuristics station adjustment skipped:', e);
-    }
-  }
+  // 物件特性補正（面積のみ）
+  const adj = calculatePropertyRevenueAdjustment({ areaPerUnit });
+  const propertyMultiplier = adj.multiplier;
+  const propertyAdjustmentReasons = adj.reasons;
 
   for (const scenario of scenarios) {
     const adjustment = scenario === 'NEGATIVE' ? -10 : scenario === 'POSITIVE' ? 10 : 0;
@@ -420,7 +368,6 @@ async function runHeuristicsSimulation(
         scenario_adjustment: adjustment,
         revenue_adjustment_multiplier: propertyMultiplier,
         revenue_adjustment_reasons: propertyAdjustmentReasons,
-        nearest_station: nearestStation,
         costs: {
           cleaning_fee_per_reservation: costs.cleaning_fee_per_reservation,
           ota_fee_rate: costs.ota_fee_rate,
@@ -480,16 +427,10 @@ async function runAirROISimulation(
   // baths推定: bedrooms数に基づいて（1~2bedroomsは1、3以上は1.5~2）
   const baths = bedrooms <= 2 ? 1 : Math.min(bedrooms - 1, 3);
 
-  // 2.5 物件特性補正（面積/駅距離）
-  const propertyAdj = await calculatePropertyRevenueAdjustment({
-    buildingArea: property.building_area,
-    areaPerUnit,
-    lat,
-    lng,
-  });
+  // 2.5 物件特性補正（面積のみ）
+  const propertyAdj = calculatePropertyRevenueAdjustment({ areaPerUnit });
   const propertyMultiplier = propertyAdj.multiplier;
   const propertyAdjustmentReasons = propertyAdj.reasons;
-  const nearestStation = propertyAdj.nearestStation;
 
   // 3. AirROI /listings/comparables で類似物件を取得
   const airroiClient = new AirROIClient();
@@ -597,7 +538,6 @@ async function runAirROISimulation(
         avg_stay: avgStay,
         revenue_adjustment_multiplier: propertyMultiplier,
         revenue_adjustment_reasons: propertyAdjustmentReasons,
-        nearest_station: nearestStation,
         costs: {
           cleaning_fee_per_reservation: costs.cleaning_fee_per_reservation,
           ota_fee_rate: costs.ota_fee_rate,

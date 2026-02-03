@@ -352,7 +352,6 @@ export default function PropertyDetailPage() {
                       const comparablesCount = sim.assumptions?.comparables_count as number | undefined;
                       const adjustmentMultiplier = sim.assumptions?.revenue_adjustment_multiplier as number | undefined;
                       const adjustmentReasons = sim.assumptions?.revenue_adjustment_reasons as string[] | undefined;
-                      const nearestStation = sim.assumptions?.nearest_station as { name: string; distance_m: number } | undefined;
                       return (
                         <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
                           <div className="flex flex-wrap items-center gap-4">
@@ -379,14 +378,6 @@ export default function PropertyDetailPage() {
                               <div>
                                 <span className="text-gray-500">補正倍率: </span>
                                 <span className="font-medium">{adjustmentMultiplier.toFixed(3)}倍</span>
-                              </div>
-                            )}
-                            {nearestStation?.name && typeof nearestStation.distance_m === 'number' && (
-                              <div>
-                                <span className="text-gray-500">最寄駅: </span>
-                                <span className="font-medium">
-                                  {nearestStation.name}（約{Math.round(nearestStation.distance_m)}m）
-                                </span>
                               </div>
                             )}
                           </div>

@@ -58,33 +58,73 @@ export default function DashboardPage() {
   async function triggerJob(job: 'simulate' | 'notify') {
     setTriggering(job);
     try {
-      const res = await fetch(`/api/jobs/${job}`, {
-        method: 'POST',
-      });
-      const contentType = res.headers.get('content-type') || '';
-      const rawText = await res.text();
-      const parsed =
-        contentType.includes('application/json')
-          ? (() => {
-              try {
-                return JSON.parse(rawText) as Record<string, unknown>;
-              } catch {
-                return null;
-              }
-            })()
-          : null;
+      if (job === 'simulate') {
+        // 大量処理前提: サーバレス制限のためページングしつつ複数回叩く
+        let offset = 0;
+        let totalSimulated = 0;
+        let loops = 0;
+        while (loops < 200) {
+          loops++;
+          const res = await fetch(`/api/jobs/simulate?offset=${offset}`, { method: 'POST' });
+          const contentType = res.headers.get('content-type') || '';
+          const rawText = await res.text();
+          const parsed =
+            contentType.includes('application/json')
+              ? (() => {
+                  try {
+                    return JSON.parse(rawText) as Record<string, unknown>;
+                  } catch {
+                    return null;
+                  }
+                })()
+              : null;
 
-      if (!res.ok) {
-        const errorDetail =
-          (parsed?.error as string | undefined) ||
-          (parsed?.message as string | undefined) ||
-          `${res.status} ${res.statusText} / ${rawText.slice(0, 200)}`;
-        alert(`${job}の実行に失敗しました: ${errorDetail}`);
+          if (!res.ok || !parsed) {
+            const errorDetail =
+              (parsed?.error as string | undefined) ||
+              `${res.status} ${res.statusText} / ${rawText.slice(0, 200)}`;
+            alert(`simulateの実行に失敗しました: ${errorDetail}`);
+            break;
+          }
+
+          totalSimulated += (parsed.simulated as number | undefined) || 0;
+          const hasMore = (parsed.has_more as boolean | undefined) || false;
+          offset = (parsed.next_offset as number | undefined) ?? (offset + 200);
+
+          if (!hasMore) {
+            alert(`simulate完了: ${totalSimulated}件`);
+            break;
+          }
+        }
       } else {
-        const message = (parsed?.message as string | undefined) || '';
-        if (message) alert(message);
+        const res = await fetch(`/api/jobs/${job}`, {
+          method: 'POST',
+        });
+        const contentType = res.headers.get('content-type') || '';
+        const rawText = await res.text();
+        const parsed =
+          contentType.includes('application/json')
+            ? (() => {
+                try {
+                  return JSON.parse(rawText) as Record<string, unknown>;
+                } catch {
+                  return null;
+                }
+              })()
+            : null;
+
+        if (!res.ok) {
+          const errorDetail =
+            (parsed?.error as string | undefined) ||
+            (parsed?.message as string | undefined) ||
+            `${res.status} ${res.statusText} / ${rawText.slice(0, 200)}`;
+          alert(`${job}の実行に失敗しました: ${errorDetail}`);
+        } else {
+          const message = (parsed?.message as string | undefined) || '';
+          if (message) alert(message);
+        }
       }
-      
+
       await fetchStats();
     } catch (error) {
       console.error(`Failed to trigger ${job}:`, error);
