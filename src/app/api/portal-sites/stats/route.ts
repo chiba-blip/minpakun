@@ -46,7 +46,6 @@ export async function GET() {
           key: site.key,
           name: site.name,
           enabled: site.enabled,
-          property_types: site.property_types || [],
           listingsCount: listingsCount || 0,
           simulatedCount,
           lastScrapedAt: lastListing?.scraped_at || null,

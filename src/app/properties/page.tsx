@@ -186,7 +186,8 @@ export default function PropertiesPage() {
         multiple: String(condition.multiple),
       });
       // showAll=trueで倍率フィルタを無視（条件外も表示）
-      if (showAllOverride !== false) {
+      // デフォルトではフィルタを適用する
+      if (showAllOverride === true) {
         params.set('showAll', 'true');
       }
       if (condition.areas.length > 0) {

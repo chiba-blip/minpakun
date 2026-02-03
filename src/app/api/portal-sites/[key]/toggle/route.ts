@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
 
 /**
- * ポータルサイトの設定更新（ON/OFF、物件タイプ）
+ * ポータルサイトのON/OFF切り替え
  */
 export async function POST(
   request: NextRequest,
@@ -13,29 +13,18 @@ export async function POST(
 
   try {
     const body = await request.json();
-    
-    // 更新するフィールドを構築
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updates: any = {};
-    
-    if (body.enabled !== undefined) {
-      updates.enabled = body.enabled === true;
-    }
-    
-    if (body.property_types !== undefined) {
-      updates.property_types = body.property_types;
-    }
+    const enabled = body.enabled === true;
 
     const { error } = await supabase
       .from('portal_sites')
-      .update(updates)
+      .update({ enabled })
       .eq('key', key);
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, ...updates });
+    return NextResponse.json({ success: true, enabled });
   } catch (error) {
-    console.error('Failed to update portal site:', error);
+    console.error('Failed to toggle portal site:', error);
     return NextResponse.json(
       { success: false, error: String(error) },
       { status: 500 }

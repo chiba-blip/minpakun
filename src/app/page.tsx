@@ -30,18 +30,10 @@ interface PortalSiteStat {
   key: string;
   name: string;
   enabled: boolean;
-  property_types: string[];
   listingsCount: number;
   simulatedCount: number;
   lastScrapedAt: string | null;
 }
-
-// 物件タイプの選択肢
-const PROPERTY_TYPE_OPTIONS = [
-  { value: '中古戸建て', label: '中古戸建て' },
-  { value: '一棟集合住宅', label: '一棟アパート・マンション' },
-  { value: '区分マンション', label: '区分マンション' },
-];
 
 interface ScrapeProgress {
   site_key: string;
@@ -117,29 +109,6 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Failed to toggle site:', error);
     }
-  }
-
-  async function updatePropertyTypes(siteKey: string, propertyTypes: string[]) {
-    try {
-      await fetch(`/api/portal-sites/${siteKey}/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ property_types: propertyTypes }),
-      });
-      // ローカルステートを更新
-      setPortalStats(prev => prev.map(s => 
-        s.key === siteKey ? { ...s, property_types: propertyTypes } : s
-      ));
-    } catch (error) {
-      console.error('Failed to update property types:', error);
-    }
-  }
-
-  function togglePropertyType(siteKey: string, currentTypes: string[], type: string) {
-    const newTypes = currentTypes.includes(type)
-      ? currentTypes.filter(t => t !== type)
-      : [...currentTypes, type];
-    updatePropertyTypes(siteKey, newTypes);
   }
 
   // バッチスクレイピング（繰り返し呼び出しで全件取得）
@@ -475,28 +444,6 @@ export default function DashboardPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* 物件タイプ選択 */}
-                <div className="flex flex-wrap gap-2">
-                  {PROPERTY_TYPE_OPTIONS.map((type) => (
-                    <label 
-                      key={type.value}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm cursor-pointer border transition-colors ${
-                        (site.property_types || []).includes(type.value)
-                          ? 'bg-blue-100 border-blue-300 text-blue-800'
-                          : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="sr-only"
-                        checked={(site.property_types || []).includes(type.value)}
-                        onChange={() => togglePropertyType(site.key, site.property_types || [], type.value)}
-                      />
-                      {type.label}
-                    </label>
-                  ))}
-                </div>
-
                 {/* 統計情報 */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div className="bg-gray-50 p-3 rounded-lg">
