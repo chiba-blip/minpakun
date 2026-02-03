@@ -15,31 +15,86 @@ import { fetchHtml, throttle } from '../http.mts';
 import { logInfo, logError } from '../log.mts';
 import { normalizeAddress, extractCity } from '../normalize/address.mts';
 
+// エリアコードマッピング
+const RENGOTAI_AREA_CODES: { [key: string]: string } = {
+  '札幌市': '1101,1102,1103,1104,1105,1106,1107,1108,1109,1110',
+  '札幌市中央区': '1101',
+  '札幌市北区': '1102',
+  '札幌市東区': '1103',
+  '札幌市白石区': '1104',
+  '札幌市厚別区': '1105',
+  '札幌市豊平区': '1106',
+  '札幌市清田区': '1107',
+  '札幌市南区': '1108',
+  '札幌市西区': '1109',
+  '札幌市手稲区': '1110',
+  '函館市': '1202',
+  '小樽市': '1203',
+  '旭川市': '1204',
+  '室蘭市': '1205',
+  '釧路市': '1206',
+  '帯広市': '1207',
+  '北見市': '1208',
+  '夕張市': '1209',
+  '岩見沢市': '1210',
+  '網走市': '1211',
+  '留萌市': '1212',
+  '苫小牧市': '1213',
+  '稚内市': '1214',
+  '美唄市': '1215',
+  '芦別市': '1216',
+  '江別市': '1217',
+  '赤平市': '1218',
+  '紋別市': '1219',
+  '士別市': '1220',
+  '名寄市': '1221',
+  '三笠市': '1222',
+  '根室市': '1223',
+  '千歳市': '1224',
+  '滝川市': '1225',
+  '砂川市': '1226',
+  '歌志内市': '1227',
+  '深川市': '1228',
+  '富良野市': '1229',
+  '登別市': '1230',
+  '恵庭市': '1231',
+  '伊達市': '1233',
+  '北広島市': '1234',
+  '石狩市': '1235',
+  '北斗市': '1236',
+};
+
+// 物件タイプコードマッピング
+const RENGOTAI_DIV_CODES: { [key: string]: string } = {
+  '一戸建て': '24',
+  'マンション': '23',
+  '土地': '26',
+};
+
 export class HokkaidoRengotaiConnector implements Connector {
   readonly key = 'hokkaido-rengotai';
   readonly name = '北海道不動産連合隊';
 
-  private baseUrl = 'https://www.rengotai.com';
+  private listBaseUrl = 'https://fudosanlist.cbiz.ne.jp';
+  private detailBaseUrl = 'https://fudosan.cbiz.ne.jp';
 
   /**
    * 検索URLを構築
    */
-  private buildSearchUrl(propertyType: string, page: number = 1): string {
+  private buildSearchUrl(areaCode: string, divCode: string, page: number = 1): string {
     // 連合隊の検索URL構造
-    // 中古一戸建て: /sale/kodate/
-    // 中古マンション: /sale/mansion/
-    let typePath = 'kodate';
-    if (propertyType === 'マンション') {
-      typePath = 'mansion';
-    }
+    // https://fudosanlist.cbiz.ne.jp/list/sale/?area=hokkaido&prop=1&nstg=2&div=24&a2=1203
+    const params = new URLSearchParams({
+      area: 'hokkaido',
+      prop: '1',  // 売買物件
+      nstg: '2',  // ステータス
+      div: divCode,
+      a2: areaCode,
+      page: String(page),
+      lim: '50',  // 1ページ50件
+    });
     
-    let url = `${this.baseUrl}/sale/${typePath}/`;
-    
-    if (page > 1) {
-      url += `?page=${page}`;
-    }
-    
-    return url;
+    return `${this.listBaseUrl}/list/sale/?${params.toString()}`;
   }
 
   /**
@@ -47,7 +102,7 @@ export class HokkaidoRengotaiConnector implements Connector {
    */
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
-    const maxPages = params.maxPages || 3;
+    const maxPages = params.maxPages || 10;
 
     logInfo(`[${this.key}] Starting search`, { 
       areas: params.areas, 
@@ -58,25 +113,38 @@ export class HokkaidoRengotaiConnector implements Connector {
       ? params.propertyTypes 
       : ['一戸建て'];
 
-    for (const propType of propertyTypes) {
-      for (let page = 1; page <= maxPages; page++) {
-        try {
-          const url = this.buildSearchUrl(propType, page);
-          logInfo(`[${this.key}] Fetching page ${page}`, { url });
+    // エリアごと、物件タイプごとに検索
+    for (const areaName of params.areas) {
+      const areaCode = RENGOTAI_AREA_CODES[areaName];
+      if (!areaCode) {
+        logInfo(`[${this.key}] No area code for: ${areaName}`);
+        continue;
+      }
 
-          const html = await fetchHtml(url);
-          const pageResults = this.parseSearchResults(html);
+      for (const propType of propertyTypes) {
+        const divCode = RENGOTAI_DIV_CODES[propType] || '24';
 
-          if (pageResults.length === 0) {
-            logInfo(`[${this.key}] No more results at page ${page}`);
+        for (let page = 1; page <= maxPages; page++) {
+          try {
+            const url = this.buildSearchUrl(areaCode, divCode, page);
+            logInfo(`[${this.key}] Fetching ${areaName} ${propType} page ${page}`, { url });
+
+            const html = await fetchHtml(url);
+            const pageResults = this.parseSearchResults(html);
+
+            logInfo(`[${this.key}] Found ${pageResults.length} candidates on page ${page}`);
+
+            if (pageResults.length === 0) {
+              logInfo(`[${this.key}] No more results at page ${page}`);
+              break;
+            }
+
+            candidates.push(...pageResults);
+            await throttle(2000);
+          } catch (error) {
+            logError(`[${this.key}] Search error at page ${page}`, { error: String(error) });
             break;
           }
-
-          candidates.push(...pageResults);
-          await throttle(2000);
-        } catch (error) {
-          logError(`[${this.key}] Search error at page ${page}`, { error: String(error) });
-          break;
         }
       }
     }
@@ -96,24 +164,13 @@ export class HokkaidoRengotaiConnector implements Connector {
     const results: ListingCandidate[] = [];
 
     // 連合隊の物件詳細リンクパターン
-    const propertyPattern = /href="(https:\/\/www\.rengotai\.com\/[^"]*detail[^"]*)"/gi;
+    // https://fudosan.cbiz.ne.jp/detailPage/sale/1266/545/?prop=1&area=hokkaido&fr=l
+    const propertyPattern = /href="(https:\/\/fudosan\.cbiz\.ne\.jp\/detailPage\/sale\/[^"]+)"/gi;
     const matches = html.matchAll(propertyPattern);
 
     for (const match of matches) {
       let fullUrl = match[1];
-      fullUrl = fullUrl.split('?')[0];
-      
-      if (!results.some(r => r.url === fullUrl)) {
-        results.push({ url: fullUrl });
-      }
-    }
-
-    // 相対URLパターン
-    const relativePattern = /href="(\/sale\/[^"]*\/\d+\/?[^"]*)"/gi;
-    const relativeMatches = html.matchAll(relativePattern);
-
-    for (const match of relativeMatches) {
-      let fullUrl = `${this.baseUrl}${match[1]}`;
+      // クエリパラメータを除去
       fullUrl = fullUrl.split('?')[0];
       
       if (!results.some(r => r.url === fullUrl)) {
@@ -179,6 +236,7 @@ export class HokkaidoRengotaiConnector implements Connector {
   private extractTitle(html: string): string {
     const patterns = [
       /<h1[^>]*>([^<]+)<\/h1>/i,
+      /<title>売買物件詳細\s*\(([^)]+)\)/i,
       /<title>([^<|｜]+)/i,
     ];
     
@@ -192,8 +250,16 @@ export class HokkaidoRengotaiConnector implements Connector {
   }
 
   private extractPrice(html: string): number | null {
+    // 億円パターン
+    const okuPattern = /<div class="price01">(\d+)<span class="unit">億<\/span>/i;
+    const okuMatch = html.match(okuPattern);
+    if (okuMatch) {
+      return parseInt(okuMatch[1], 10) * 100000000;
+    }
+
+    // 万円パターン
     const patterns = [
-      /販売価格[：:\s]*([\d,]+)\s*万円/,
+      /<div class="price01">([\d,]+)<span class="unit">万<\/span>/i,
       /価格[：:\s]*([\d,]+)\s*万円/,
       /([\d,]+)\s*万円/,
     ];
@@ -211,16 +277,21 @@ export class HokkaidoRengotaiConnector implements Connector {
   }
 
   private extractAddress(html: string): string | null {
+    // 連合隊詳細ページのパターン
     const patterns = [
-      /所在地[：:\s]*<[^>]*>([^<]+)</,
-      /所在地[：:\s]*([^<\n]+)/,
-      /北海道[^\s<]+[市町村区][^\s<]*/,
+      /<td class="address">[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+      /"ADDRESS":"([^"]+)"/,
+      /北海道[^\s<"]+[市町村区][^\s<"]*/,
     ];
     
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) {
-        return match[1]?.trim() || match[0]?.trim();
+        const address = match[1]?.trim() || match[0]?.trim();
+        // JSONエスケープを解除
+        return address.replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => 
+          String.fromCharCode(parseInt(code, 16))
+        );
       }
     }
     return null;
@@ -228,8 +299,8 @@ export class HokkaidoRengotaiConnector implements Connector {
 
   private extractBuildingArea(html: string): number | null {
     const patterns = [
+      /<th>建物面積<\/th>[\s\S]*?<td[^>]*>([\d.]+)m/i,
       /建物面積[：:\s]*([\d.]+)\s*[㎡m²]/,
-      /延床面積[：:\s]*([\d.]+)\s*[㎡m²]/,
     ];
     
     for (const pattern of patterns) {
@@ -242,14 +313,43 @@ export class HokkaidoRengotaiConnector implements Connector {
   }
 
   private extractLandArea(html: string): number | null {
-    const match = html.match(/土地面積[：:\s]*([\d.]+)\s*[㎡m²]/);
-    return match ? parseFloat(match[1]) : null;
+    const patterns = [
+      /<th>土地面積<\/th>[\s\S]*?<td[^>]*>[\s\S]*?([\d.]+)m/i,
+      /土地面積[：:\s]*([\d.]+)\s*[㎡m²]/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return parseFloat(match[1]);
+      }
+    }
+    return null;
   }
 
   private extractBuiltYear(html: string): number | null {
     const patterns = [
-      /築年[：:\s]*(\d{4})年/,
-      /(\d{4})年[^\d]*築/,
+      /築(\d+)年.*?\((\d{4})年/i,
+      /(\d{4})年\d+月.*?築/,
+      /築年月<\/th>[\s\S]*?(\d{4})年/i,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        // 築N年パターンの場合は2番目のキャプチャ（年）を使用
+        const year = match[2] || match[1];
+        return parseInt(year, 10);
+      }
+    }
+    return null;
+  }
+
+  private extractRooms(html: string): number | null {
+    const patterns = [
+      /<span class="room_layout">(\d+)[SLDK]+<\/span>/i,
+      /間取り[：:\s]*(\d+)[SLDK]+/i,
+      /(\d+)[SLDK]+/i,
     ];
     
     for (const pattern of patterns) {
@@ -258,26 +358,24 @@ export class HokkaidoRengotaiConnector implements Connector {
         return parseInt(match[1], 10);
       }
     }
-    return null;
-  }
-
-  private extractRooms(html: string): number | null {
-    const match = html.match(/(\d+)[SLDK]+/i);
-    return match ? parseInt(match[1], 10) : 1;
+    return 1;
   }
 
   private extractPropertyType(html: string, url: string): string | null {
-    if (url.includes('/mansion/') || html.includes('マンション')) {
-      return 'マンション';
+    const divPattern = /<span class="prop_div">([^<]+)<\/span>/i;
+    const divMatch = html.match(divPattern);
+    if (divMatch) {
+      const divText = divMatch[1];
+      if (divText.includes('マンション')) return 'マンション';
+      if (divText.includes('一戸建')) return '一戸建て';
+      if (divText.includes('土地')) return '土地';
     }
-    if (url.includes('/kodate/') || html.includes('一戸建') || html.includes('戸建')) {
-      return '一戸建て';
-    }
-    return null;
+    return '一戸建て';
   }
 
   private extractExternalId(url: string): string | null {
-    const match = url.match(/\/(\d+)\/?$/);
-    return match ? match[1] : null;
+    // https://fudosan.cbiz.ne.jp/detailPage/sale/1266/545/
+    const match = url.match(/\/sale\/(\d+)\/(\d+)/);
+    return match ? `${match[1]}-${match[2]}` : null;
   }
 }
