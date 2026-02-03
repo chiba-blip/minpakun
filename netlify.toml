@@ -19,6 +19,10 @@
 [functions."scrape-background"]
   type = "background"
 
+# Background Function - バッチシミュレーション用（最大15分）
+[functions."simulate-background"]
+  type = "background"
+
 # Scheduled Functions
 # 初回取得中: 毎時実行でコツコツ取得
 # 完了後: 週1回（日曜0時）に差分スクレイプ

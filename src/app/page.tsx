@@ -46,10 +46,19 @@ interface ScrapeProgress {
   mode: string;
 }
 
+interface SimulationProgress {
+  status: string;
+  processed: number;
+  total: number;
+  message: string | null;
+  updated_at: string;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [portalStats, setPortalStats] = useState<PortalSiteStat[]>([]);
   const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress[]>([]);
+  const [simProgress, setSimProgress] = useState<SimulationProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
 
@@ -59,7 +68,7 @@ export default function DashboardPage() {
 
   async function fetchAll() {
     setLoading(true);
-    await Promise.all([fetchStats(), fetchPortalStats(), fetchScrapeProgress()]);
+    await Promise.all([fetchStats(), fetchPortalStats(), fetchScrapeProgress(), fetchSimProgress()]);
     setLoading(false);
   }
 
@@ -96,6 +105,18 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Failed to fetch scrape progress:', error);
+    }
+  }
+
+  async function fetchSimProgress() {
+    try {
+      const res = await fetch('/api/simulation-progress');
+      if (res.ok) {
+        const data = await res.json();
+        setSimProgress(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch simulation progress:', error);
     }
   }
 
@@ -235,6 +256,62 @@ export default function DashboardPage() {
       alert('中止に失敗しました');
     } finally {
       setTriggering(null);
+    }
+  }
+
+  // Background シミュレーション実行（最大15分）
+  async function runBackgroundSimulation() {
+    setTriggering('simulate');
+    
+    try {
+      const res = await fetch('/.netlify/functions/simulate-background', { method: 'POST' });
+      
+      if (!res.ok && res.status !== 202) {
+        const text = await res.text();
+        alert(`シミュレーション開始に失敗: ${text}`);
+        setTriggering(null);
+        return;
+      }
+      
+      alert('バックグラウンドシミュレーションを開始しました。\n\n最大15分間実行されます。');
+      
+      // 進捗をポーリング（最大15分）
+      const maxPolls = 180;
+      let polls = 0;
+      
+      while (polls < maxPolls) {
+        polls++;
+        await new Promise(r => setTimeout(r, 5000));
+        
+        await fetchSimProgress();
+        await fetchStats();
+        
+        if (simProgress?.status === 'completed' || simProgress?.status === 'error' || simProgress?.status === 'cancelled') {
+          break;
+        }
+        
+        // 30秒ごとに全体を更新
+        if (polls % 6 === 0) {
+          await fetchPortalStats();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to start simulation:', error);
+      alert('シミュレーション開始に失敗しました');
+    } finally {
+      setTriggering(null);
+    }
+  }
+
+  // シミュレーション中止
+  async function cancelSimulation() {
+    if (!confirm('シミュレーションを中止しますか？')) return;
+    
+    try {
+      await fetch('/api/simulation-progress/cancel', { method: 'POST' });
+      await fetchSimProgress();
+    } catch (error) {
+      console.error('Failed to cancel simulation:', error);
     }
   }
 
@@ -429,25 +506,82 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 全体操作 */}
+      {/* シミュレーション */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">全体操作</CardTitle>
+          <CardTitle className="text-lg">シミュレーション</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-3">
+            <Button
+              onClick={runBackgroundSimulation}
+              disabled={!!triggering || simProgress?.status === 'in_progress'}
+              variant="default"
+            >
+              {triggering === 'simulate' || simProgress?.status === 'in_progress' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Zap className="w-4 h-4 mr-2" />
+              )}
+              バックグラウンドシミュレーション（最大15分）
+            </Button>
+            
+            {simProgress?.status === 'in_progress' && (
+              <Button
+                onClick={cancelSimulation}
+                variant="destructive"
+                size="sm"
+              >
+                <StopCircle className="w-4 h-4 mr-2" />
+                中止
+              </Button>
+            )}
+
             <Button
               onClick={runSimulation}
               disabled={!!triggering}
+              variant="outline"
             >
               {triggering === 'simulate-all' ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               ) : (
                 <Play className="w-4 h-4 mr-2" />
               )}
-              全体シミュレーション実行
+              通常シミュレーション
             </Button>
           </div>
+
+          {/* シミュレーション進捗 */}
+          {simProgress && simProgress.status !== 'idle' && (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">
+                  {simProgress.status === 'in_progress' ? '実行中...' :
+                   simProgress.status === 'completed' ? '完了' :
+                   simProgress.status === 'cancelled' ? 'キャンセル' :
+                   simProgress.status === 'error' ? 'エラー' : simProgress.status}
+                </span>
+                <span className="text-sm text-gray-500">
+                  {simProgress.processed} / {simProgress.total}
+                </span>
+              </div>
+              {simProgress.total > 0 && (
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full ${
+                      simProgress.status === 'completed' ? 'bg-green-500' :
+                      simProgress.status === 'error' ? 'bg-red-500' :
+                      'bg-blue-500'
+                    }`}
+                    style={{ width: `${Math.min(100, (simProgress.processed / simProgress.total) * 100)}%` }}
+                  />
+                </div>
+              )}
+              {simProgress.message && (
+                <p className="text-xs text-gray-500 mt-2">{simProgress.message}</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
