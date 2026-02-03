@@ -48,7 +48,11 @@ export default function ScrapeSettingsPage() {
       
       if (res.ok && !result.error) {
         setConfig(result);
-        alert('設定を保存しました');
+        if (result.config_changed && result.progress_reset) {
+          alert('設定を保存しました。\n\n条件が変更されたため、スクレイプ進捗をリセットしました。\n次回スクレイプは最初から実行されます。');
+        } else {
+          alert('設定を保存しました');
+        }
       } else {
         alert(`保存に失敗しました: ${result.error || '不明なエラー'}`);
       }

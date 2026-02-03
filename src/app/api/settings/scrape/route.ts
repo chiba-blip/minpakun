@@ -27,19 +27,36 @@ export async function PUT(request: NextRequest) {
 
   // idがない場合は最初のレコードを取得して更新
   let targetId = id;
+  let existingConfig = null;
+  
   if (!targetId) {
     const { data: existing } = await supabase
       .from('scrape_configs')
-      .select('id')
+      .select('*')
       .order('created_at', { ascending: true })
       .limit(1)
       .single();
     targetId = existing?.id;
+    existingConfig = existing;
+  } else {
+    const { data: existing } = await supabase
+      .from('scrape_configs')
+      .select('*')
+      .eq('id', targetId)
+      .single();
+    existingConfig = existing;
   }
 
   if (!targetId) {
     return NextResponse.json({ error: 'レコードが見つかりません' }, { status: 404 });
   }
+
+  // 条件が変更されたかチェック
+  const areasChanged = areas !== undefined && 
+    JSON.stringify(areas.sort()) !== JSON.stringify((existingConfig?.areas || []).sort());
+  const typesChanged = property_types !== undefined && 
+    JSON.stringify(property_types.sort()) !== JSON.stringify((existingConfig?.property_types || []).sort());
+  const configChanged = areasChanged || typesChanged;
 
   const updateData: Record<string, unknown> = {};
   if (enabled !== undefined) updateData.enabled = enabled;
@@ -58,5 +75,26 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data);
+  // 条件が変更された場合、実行中のスクレイプをキャンセルして進捗をリセット
+  if (configChanged) {
+    console.log('[scrape settings] Config changed, cancelling and resetting progress');
+    
+    // 実行中のスクレイプをキャンセル
+    await supabase
+      .from('scrape_progress')
+      .update({ status: 'cancelled' })
+      .eq('status', 'in_progress');
+    
+    // 全ての進捗をリセット（削除）
+    await supabase
+      .from('scrape_progress')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // 全削除
+  }
+
+  return NextResponse.json({ 
+    ...data, 
+    config_changed: configChanged,
+    progress_reset: configChanged,
+  });
 }
