@@ -21,6 +21,20 @@ const CONSECUTIVE_SKIP_THRESHOLD = 30;
 const DETAIL_THROTTLE_MS = 800;
 const PAGE_THROTTLE_MS = 3000;  // ページ間は3秒待機（ボット対策）
 
+// キャンセルチェック用ヘルパー
+async function isCancelled(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  siteKey: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('scrape_progress')
+    .select('status')
+    .eq('site_key', siteKey)
+    .eq('status', 'cancelled')
+    .limit(1);
+  return data && data.length > 0;
+}
+
 // エリアスラッグ（アットホーム用）- constants.tsと統一
 const ATHOME_AREA_SLUGS: Record<string, string> = {
   // 札幌市
@@ -257,6 +271,13 @@ async function processRengotai(
     let consecutiveSkips = 0;
 
     for (const candidate of candidates) {
+      // キャンセルチェック
+      if (await isCancelled(supabase, 'hokkaido-rengotai')) {
+        logInfo('[scrape-background] Cancelled by user');
+        await updateProgress(supabase, progress.id, { status: 'cancelled' });
+        return;
+      }
+
       if (Date.now() - startTime > MAX_TIME_MS) {
         logInfo('[scrape-background] Time limit reached');
         break;
@@ -341,6 +362,12 @@ async function processAthome(
   }
 
   for (const areaName of targetAreas) {
+      // キャンセルチェック
+      if (await isCancelled(supabase, 'athome')) {
+        logInfo('[scrape-background] Cancelled by user');
+        return;
+      }
+
       // 時間チェック
       if (Date.now() - startTime > MAX_TIME_MS) {
         logInfo(`[scrape-background] Time limit reached: ${Math.round((Date.now() - startTime) / 1000)}s`);

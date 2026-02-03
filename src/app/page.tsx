@@ -15,6 +15,7 @@ import {
   RefreshCw,
   RotateCcw,
   Info,
+  StopCircle,
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -207,6 +208,31 @@ export default function DashboardPage() {
       console.error(`Failed to scrape ${siteKey}:`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
       alert(`${siteName}の取得に失敗: ${errorMsg}`);
+    } finally {
+      setTriggering(null);
+    }
+  }
+
+  // スクレイピング中止
+  async function cancelScraping(siteKey: string, siteName: string) {
+    if (!confirm(`${siteName}のスクレイピングを中止しますか？`)) {
+      return;
+    }
+    
+    setTriggering(`cancel-${siteKey}`);
+    try {
+      const res = await fetch(`/api/portal-sites/${siteKey}/cancel`, { method: 'POST' });
+      const result = await res.json();
+      
+      if (result.success) {
+        alert(`${siteName}のスクレイピングを中止しました`);
+      } else {
+        alert(`中止に失敗: ${result.error}`);
+      }
+      await fetchAll();
+    } catch (error) {
+      console.error('Failed to cancel scraping:', error);
+      alert('中止に失敗しました');
     } finally {
       setTriggering(null);
     }
@@ -522,6 +548,21 @@ export default function DashboardPage() {
                       <Play className="w-4 h-4 mr-1" />
                     )}
                     テスト（5件）
+                  </Button>
+
+                  <Button
+                    onClick={() => cancelScraping(site.key, site.name)}
+                    disabled={!!triggering}
+                    variant="outline"
+                    size="sm"
+                    className="text-orange-600 border-orange-200 hover:bg-orange-50"
+                  >
+                    {triggering === `cancel-${site.key}` ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <StopCircle className="w-4 h-4 mr-1" />
+                    )}
+                    中止
                   </Button>
 
                   <Button
