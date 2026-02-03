@@ -36,19 +36,25 @@ export default function ScrapeSettingsPage() {
     
     setSaving(true);
     try {
+      console.log('Saving config:', config);
       const res = await fetch('/api/settings/scrape', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
       
-      if (res.ok) {
-        const updated = await res.json();
-        setConfig(updated);
+      const result = await res.json();
+      console.log('Save response:', result);
+      
+      if (res.ok && !result.error) {
+        setConfig(result);
         alert('設定を保存しました');
+      } else {
+        alert(`保存に失敗しました: ${result.error || '不明なエラー'}`);
       }
     } catch (error) {
       console.error('Failed to save config:', error);
+      alert(`保存に失敗しました: ${error}`);
     } finally {
       setSaving(false);
     }

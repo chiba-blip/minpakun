@@ -24,6 +24,8 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const { id, enabled, areas, property_types } = body;
 
+  console.log('[scrape settings] PUT request:', { id, enabled, areas, property_types });
+
   if (!id) {
     return NextResponse.json({ error: 'id is required' }, { status: 400 });
   }
@@ -33,6 +35,8 @@ export async function PUT(request: NextRequest) {
   if (areas !== undefined) updateData.areas = areas;
   if (property_types !== undefined) updateData.property_types = property_types;
 
+  console.log('[scrape settings] Updating with:', updateData);
+
   const { data, error } = await supabase
     .from('scrape_configs')
     .update(updateData)
@@ -41,8 +45,10 @@ export async function PUT(request: NextRequest) {
     .single();
 
   if (error) {
+    console.error('[scrape settings] Update error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  console.log('[scrape settings] Updated successfully:', data);
   return NextResponse.json(data);
 }
