@@ -120,8 +120,8 @@ export class AirROIClient {
   async getMetricsBulk(listingIds: number[], numMonths: number = 12): Promise<MetricsResponse[]> {
     const results: MetricsResponse[] = [];
     
-    // 最大10件まで取得（API負荷を考慮）
-    const idsToFetch = listingIds.slice(0, 10);
+    // 最大5件まで取得（API負荷とコストを考慮）
+    const idsToFetch = listingIds.slice(0, 5);
     
     for (const id of idsToFetch) {
       try {
