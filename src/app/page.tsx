@@ -90,26 +90,39 @@ export default function DashboardPage() {
     const actionKey = testMode ? `scrape-test-${siteKey}` : `scrape-${siteKey}`;
     setTriggering(actionKey);
     try {
+      // テストモードも通常モードも同じAPI（5件 vs バッチ）
       const endpoint = testMode 
         ? `/api/jobs/scrape?site=${siteKey}` 
-        : `/api/jobs/scrape-batch?site=${siteKey}&mode=initial`;
+        : `/api/jobs/scrape?site=${siteKey}`;
       
       const res = await fetch(endpoint, { method: 'POST' });
+      
+      // レスポンスがJSONかどうかチェック
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        console.error('Non-JSON response:', text.substring(0, 500));
+        alert(`${siteName}の取得に失敗: サーバーエラー`);
+        return;
+      }
+      
       const result = await res.json();
       
       if (result.error) {
-        alert(`${siteName}の取得に失敗: ${result.error}`);
-      } else if (testMode) {
-        alert(`${siteName}: ${result.inserted || 0}件取得`);
+        // エラーを文字列に変換
+        const errorMsg = typeof result.error === 'object' 
+          ? JSON.stringify(result.error) 
+          : String(result.error);
+        alert(`${siteName}の取得に失敗: ${errorMsg}`);
       } else {
-        const status = result.completed ? '（全エリア完了）' : '（継続中）';
-        alert(`${siteName}: ${result.total_inserted || 0}件取得 ${status}`);
+        alert(`${siteName}: ${result.inserted || 0}件取得、${result.skipped || 0}件スキップ`);
       }
       
       await fetchAll();
     } catch (error) {
       console.error(`Failed to scrape ${siteKey}:`, error);
-      alert(`${siteName}の取得に失敗しました`);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      alert(`${siteName}の取得に失敗: ${errorMsg}`);
     } finally {
       setTriggering(null);
     }

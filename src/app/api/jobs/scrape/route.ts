@@ -135,8 +135,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(results);
   } catch (error) {
     console.error('[scrape] Failed:', error);
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : typeof error === 'object' 
+        ? JSON.stringify(error) 
+        : String(error);
     return NextResponse.json(
-      { ...results, error: String(error) },
+      { ...results, error: errorMessage },
       { status: 500 }
     );
   }
