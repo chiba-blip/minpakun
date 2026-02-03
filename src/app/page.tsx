@@ -123,7 +123,7 @@ export default function DashboardPage() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await res.text();
         console.error('Non-JSON response:', text.substring(0, 500));
-        alert(`${siteName}の取得に失敗: サーバーエラー（scrape_progressテーブルが存在しない可能性があります）`);
+        alert(`${siteName}の取得に失敗: サーバーエラー\n${text.substring(0, 200)}`);
         return;
       }
       

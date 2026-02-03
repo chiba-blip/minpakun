@@ -267,12 +267,17 @@ async function getOrCreateProgress(
   areaName: string,
   mode: string
 ): Promise<ScrapeProgress> {
-  const { data: existing } = await supabase
+  const { data: existing, error: selectError } = await supabase
     .from('scrape_progress')
     .select('*')
     .eq('site_key', siteKey)
     .eq('area_key', areaKey)
-    .single();
+    .maybeSingle();
+
+  // エラーがあっても無視（レコードなしの場合もある）
+  if (selectError) {
+    console.log(`[getOrCreateProgress] Select error (ignored): ${selectError.message}`);
+  }
 
   if (existing) {
     if (mode === 'incremental' && existing.status === 'completed') {
