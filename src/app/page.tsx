@@ -13,6 +13,8 @@ import {
   Trash2,
   Zap,
   RefreshCw,
+  RotateCcw,
+  Info,
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -33,9 +35,20 @@ interface PortalSiteStat {
   lastScrapedAt: string | null;
 }
 
+interface ScrapeProgress {
+  site_key: string;
+  area_name: string;
+  current_page: number;
+  processed_count: number;
+  inserted_count: number;
+  status: string;
+  mode: string;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [portalStats, setPortalStats] = useState<PortalSiteStat[]>([]);
+  const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
 
@@ -45,7 +58,7 @@ export default function DashboardPage() {
 
   async function fetchAll() {
     setLoading(true);
-    await Promise.all([fetchStats(), fetchPortalStats()]);
+    await Promise.all([fetchStats(), fetchPortalStats(), fetchScrapeProgress()]);
     setLoading(false);
   }
 
@@ -73,6 +86,18 @@ export default function DashboardPage() {
     }
   }
 
+  async function fetchScrapeProgress() {
+    try {
+      const res = await fetch('/api/scrape-progress');
+      if (res.ok) {
+        const data = await res.json();
+        setScrapeProgress(data.progress || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch scrape progress:', error);
+    }
+  }
+
   async function toggleSite(siteKey: string, enabled: boolean) {
     try {
       await fetch(`/api/portal-sites/${siteKey}/toggle`, {
@@ -86,22 +111,52 @@ export default function DashboardPage() {
     }
   }
 
-  async function scrapeSite(siteKey: string, siteName: string, testMode: boolean = false) {
-    const actionKey = testMode ? `scrape-test-${siteKey}` : `scrape-${siteKey}`;
-    setTriggering(actionKey);
+  // バッチスクレイピング（続きから取得、最大200件）
+  async function scrapeBatch(siteKey: string, siteName: string) {
+    setTriggering(`scrape-${siteKey}`);
     try {
-      // テストモードも通常モードも同じAPI（5件 vs バッチ）
-      const endpoint = testMode 
-        ? `/api/jobs/scrape?site=${siteKey}` 
-        : `/api/jobs/scrape?site=${siteKey}`;
+      const res = await fetch(`/api/jobs/scrape-batch?site=${siteKey}&mode=initial`, { 
+        method: 'POST' 
+      });
       
-      const res = await fetch(endpoint, { method: 'POST' });
-      
-      // レスポンスがJSONかどうかチェック
       const contentType = res.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
         const text = await res.text();
         console.error('Non-JSON response:', text.substring(0, 500));
+        alert(`${siteName}の取得に失敗: サーバーエラー（scrape_progressテーブルが存在しない可能性があります）`);
+        return;
+      }
+      
+      const result = await res.json();
+      
+      if (result.error) {
+        const errorMsg = typeof result.error === 'object' 
+          ? JSON.stringify(result.error) 
+          : String(result.error);
+        alert(`${siteName}の取得に失敗: ${errorMsg}`);
+      } else {
+        const status = result.completed ? '（全エリア完了）' : '（継続中、再度クリックで続きを取得）';
+        alert(`${siteName}: ${result.total_inserted || 0}件取得 ${status}\n処理エリア: ${result.areas_processed?.join(', ') || 'なし'}`);
+      }
+      
+      await fetchAll();
+    } catch (error) {
+      console.error(`Failed to scrape ${siteKey}:`, error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      alert(`${siteName}の取得に失敗: ${errorMsg}`);
+    } finally {
+      setTriggering(null);
+    }
+  }
+
+  // テストスクレイピング（5件のみ）
+  async function scrapeTest(siteKey: string, siteName: string) {
+    setTriggering(`scrape-test-${siteKey}`);
+    try {
+      const res = await fetch(`/api/jobs/scrape?site=${siteKey}`, { method: 'POST' });
+      
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
         alert(`${siteName}の取得に失敗: サーバーエラー`);
         return;
       }
@@ -109,7 +164,6 @@ export default function DashboardPage() {
       const result = await res.json();
       
       if (result.error) {
-        // エラーを文字列に変換
         const errorMsg = typeof result.error === 'object' 
           ? JSON.stringify(result.error) 
           : String(result.error);
@@ -123,6 +177,25 @@ export default function DashboardPage() {
       console.error(`Failed to scrape ${siteKey}:`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
       alert(`${siteName}の取得に失敗: ${errorMsg}`);
+    } finally {
+      setTriggering(null);
+    }
+  }
+
+  // 進捗リセット
+  async function resetProgress(siteKey: string, siteName: string) {
+    if (!confirm(`${siteName}の取得進捗をリセットしますか？次回は最初から取得します。`)) {
+      return;
+    }
+    
+    setTriggering(`reset-${siteKey}`);
+    try {
+      await fetch(`/api/jobs/scrape-batch?site=${siteKey}&reset=true`, { method: 'POST' });
+      alert(`${siteName}の進捗をリセットしました`);
+      await fetchAll();
+    } catch (error) {
+      console.error('Failed to reset progress:', error);
+      alert('リセットに失敗しました');
     } finally {
       setTriggering(null);
     }
@@ -218,6 +291,11 @@ export default function DashboardPage() {
     }
   }
 
+  // 特定サイトの進捗を取得
+  function getSiteProgress(siteKey: string) {
+    return scrapeProgress.filter(p => p.site_key === siteKey);
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -237,6 +315,19 @@ export default function DashboardPage() {
           <RefreshCw className={`w-4 h-4 mr-2 ${triggering ? 'animate-spin' : ''}`} />
           更新
         </Button>
+      </div>
+
+      {/* 自動取得の説明 */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+        <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+        <div className="text-sm text-blue-800">
+          <p className="font-medium">自動取得について</p>
+          <p className="mt-1">
+            毎時0分に自動でスクレイピングが実行されます（初回取得完了まで）。
+            完了後は毎週日曜0時に新着物件のみ取得します。
+            シミュレーションは毎時30分に自動実行されます。
+          </p>
+        </div>
       </div>
 
       {/* 統計カード */}
@@ -304,109 +395,154 @@ export default function DashboardPage() {
       <div className="space-y-4">
         <h2 className="text-xl font-bold">ポータルサイト管理</h2>
         
-        {portalStats.map((site) => (
-          <Card key={site.id} className={!site.enabled ? 'opacity-60' : ''}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg flex items-center gap-3">
-                  {site.name}
-                  <Switch
-                    checked={site.enabled}
-                    onCheckedChange={(checked) => toggleSite(site.key, checked)}
-                  />
-                  <span className="text-sm font-normal text-gray-500">
-                    {site.enabled ? 'ON' : 'OFF'}
-                  </span>
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* 統計情報 */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <div className="text-gray-500">物件数</div>
-                  <div className="text-xl font-bold">{site.listingsCount}</div>
+        {portalStats.map((site) => {
+          const progress = getSiteProgress(site.key);
+          const completedAreas = progress.filter(p => p.status === 'completed').length;
+          const totalAreas = progress.length;
+          const inProgress = progress.some(p => p.status === 'in_progress');
+          
+          return (
+            <Card key={site.id} className={!site.enabled ? 'opacity-60' : ''}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-3">
+                    {site.name}
+                    <Switch
+                      checked={site.enabled}
+                      onCheckedChange={(checked) => toggleSite(site.key, checked)}
+                    />
+                    <span className="text-sm font-normal text-gray-500">
+                      {site.enabled ? 'ON' : 'OFF'}
+                    </span>
+                  </CardTitle>
                 </div>
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <div className="text-gray-500">シミュレーション済</div>
-                  <div className="text-xl font-bold">{site.simulatedCount}</div>
-                </div>
-                <div className="bg-gray-50 p-3 rounded-lg col-span-2">
-                  <div className="text-gray-500">最終取得</div>
-                  <div className="font-medium">
-                    {site.lastScrapedAt 
-                      ? new Date(site.lastScrapedAt).toLocaleString('ja-JP')
-                      : '未取得'}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* 統計情報 */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <div className="text-gray-500">物件数</div>
+                    <div className="text-xl font-bold">{site.listingsCount}</div>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <div className="text-gray-500">シミュレーション済</div>
+                    <div className="text-xl font-bold">{site.simulatedCount}</div>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded-lg col-span-2">
+                    <div className="text-gray-500">最終取得</div>
+                    <div className="font-medium">
+                      {site.lastScrapedAt 
+                        ? new Date(site.lastScrapedAt).toLocaleString('ja-JP')
+                        : '未取得'}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* 操作ボタン */}
-              <div className="flex flex-wrap gap-2">
-                {/* スクレイピングボタン */}
-                <Button
-                  onClick={() => scrapeSite(site.key, site.name, false)}
-                  disabled={!!triggering || !site.enabled}
-                  size="sm"
-                >
-                  {triggering === `scrape-${site.key}` ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Zap className="w-4 h-4 mr-1" />
+                {/* 進捗表示 */}
+                {totalAreas > 0 && (
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-gray-600">取得進捗</span>
+                      <span className="text-sm font-medium">
+                        {completedAreas}/{totalAreas} エリア完了
+                        {inProgress && <span className="text-blue-600 ml-2">（処理中）</span>}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all"
+                        style={{ width: `${totalAreas > 0 ? (completedAreas / totalAreas) * 100 : 0}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-gray-500">
+                      総取得: {progress.reduce((sum, p) => sum + p.inserted_count, 0)}件
+                    </div>
+                  </div>
+                )}
+
+                {/* 操作ボタン */}
+                <div className="flex flex-wrap gap-2">
+                  {/* スクレイピングボタン */}
+                  <Button
+                    onClick={() => scrapeBatch(site.key, site.name)}
+                    disabled={!!triggering || !site.enabled}
+                    size="sm"
+                  >
+                    {triggering === `scrape-${site.key}` ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Zap className="w-4 h-4 mr-1" />
+                    )}
+                    {totalAreas > 0 && completedAreas < totalAreas ? '続きを取得' : 'スクレイピング'}
+                  </Button>
+
+                  <Button
+                    onClick={() => scrapeTest(site.key, site.name)}
+                    disabled={!!triggering || !site.enabled}
+                    variant="outline"
+                    size="sm"
+                  >
+                    {triggering === `scrape-test-${site.key}` ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Play className="w-4 h-4 mr-1" />
+                    )}
+                    テスト（5件）
+                  </Button>
+
+                  {totalAreas > 0 && (
+                    <Button
+                      onClick={() => resetProgress(site.key, site.name)}
+                      disabled={!!triggering}
+                      variant="outline"
+                      size="sm"
+                    >
+                      {triggering === `reset-${site.key}` ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                      )}
+                      進捗リセット
+                    </Button>
                   )}
-                  スクレイピング
-                </Button>
 
-                <Button
-                  onClick={() => scrapeSite(site.key, site.name, true)}
-                  disabled={!!triggering || !site.enabled}
-                  variant="outline"
-                  size="sm"
-                >
-                  {triggering === `scrape-test-${site.key}` ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Play className="w-4 h-4 mr-1" />
-                  )}
-                  テスト（5件）
-                </Button>
+                  <Button
+                    onClick={() => deleteListings(site.key, site.name)}
+                    disabled={!!triggering || site.listingsCount === 0}
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    {triggering === `delete-${site.key}` ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 mr-1" />
+                    )}
+                    物件削除
+                  </Button>
 
-                <Button
-                  onClick={() => deleteListings(site.key, site.name)}
-                  disabled={!!triggering || site.listingsCount === 0}
-                  variant="outline"
-                  size="sm"
-                  className="text-red-600 border-red-200 hover:bg-red-50"
-                >
-                  {triggering === `delete-${site.key}` ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4 mr-1" />
-                  )}
-                  物件削除
-                </Button>
+                  <div className="w-px bg-gray-200 mx-1" />
 
-                <div className="w-px bg-gray-200 mx-1" />
-
-                {/* シミュレーションボタン */}
-                <Button
-                  onClick={() => deleteSimulations(site.key, site.name)}
-                  disabled={!!triggering || site.simulatedCount === 0}
-                  variant="outline"
-                  size="sm"
-                  className="text-orange-600 border-orange-200 hover:bg-orange-50"
-                >
-                  {triggering === `delete-sim-${site.key}` ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4 mr-1" />
-                  )}
-                  シミュ削除
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                  {/* シミュレーションボタン */}
+                  <Button
+                    onClick={() => deleteSimulations(site.key, site.name)}
+                    disabled={!!triggering || site.simulatedCount === 0}
+                    variant="outline"
+                    size="sm"
+                    className="text-orange-600 border-orange-200 hover:bg-orange-50"
+                  >
+                    {triggering === `delete-sim-${site.key}` ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 mr-1" />
+                    )}
+                    シミュ削除
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

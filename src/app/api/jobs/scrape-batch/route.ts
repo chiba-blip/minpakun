@@ -271,8 +271,22 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('[scrape-batch] Failed:', error);
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : typeof error === 'object' 
+        ? JSON.stringify(error) 
+        : String(error);
+    
+    // テーブルが存在しない場合の特別なメッセージ
+    if (errorMessage.includes('does not exist') || errorMessage.includes('42P01')) {
+      return NextResponse.json(
+        { ...results, error: 'scrape_progressテーブルが存在しません。Supabaseでマイグレーションを実行してください。' },
+        { status: 500 }
+      );
+    }
+    
     return NextResponse.json(
-      { ...results, error: String(error) },
+      { ...results, error: errorMessage },
       { status: 500 }
     );
   }

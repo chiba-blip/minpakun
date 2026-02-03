@@ -13,7 +13,15 @@ export async function GET() {
       .select('*')
       .order('area_name', { ascending: true });
 
+    // テーブルが存在しない場合は空配列を返す
     if (error) {
+      if (error.message.includes('does not exist') || error.code === '42P01') {
+        console.log('scrape_progress table does not exist yet');
+        return NextResponse.json({
+          progress: [],
+          summary: { total: 0, completed: 0, inProgress: 0, pending: 0, totalInserted: 0, allCompleted: false },
+        });
+      }
       throw error;
     }
 
