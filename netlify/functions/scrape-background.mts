@@ -18,8 +18,8 @@ import { throttle, fetchHtml } from './_shared/http.mts';
 // 15分の制限に対して余裕を持たせる（14分）
 const MAX_TIME_MS = 14 * 60 * 1000;
 const CONSECUTIVE_SKIP_THRESHOLD = 30;
-const DETAIL_THROTTLE_MS = 500;
-const PAGE_THROTTLE_MS = 1000;
+const DETAIL_THROTTLE_MS = 800;
+const PAGE_THROTTLE_MS = 3000;  // ページ間は3秒待機（ボット対策）
 
 // エリアスラッグ（アットホーム用）- constants.tsと統一
 const ATHOME_AREA_SLUGS: Record<string, string> = {
@@ -209,8 +209,18 @@ export default async function handler(request: Request) {
         try {
           logInfo(`[scrape-background] Fetching URL: ${searchUrl}`);
           
+          // Refererを設定（ボット対策回避）
+          const referer = progress.current_page === 1 
+            ? 'https://www.athome.co.jp/kodate/chuko/hokkaido/'
+            : getAthomeSearchUrl(areaName, progress.current_page - 1) || 'https://www.athome.co.jp/';
+          
           // HTMLを取得
-          const html = await fetchHtml(searchUrl);
+          const html = await fetchHtml(searchUrl, {
+            headers: {
+              'Referer': referer,
+              'Cookie': 'SERVERID=a; samesite=Lax',
+            }
+          });
           
           logInfo(`[scrape-background] HTML length: ${html.length}, URL: ${searchUrl}`);
           
