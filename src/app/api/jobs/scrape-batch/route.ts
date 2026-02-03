@@ -319,7 +319,8 @@ async function saveListing(
     existingProperty = data;
   }
 
-  if (!existingProperty && listing.property.normalized_address?.length > 10) {
+  const normalizedAddress = listing.property?.normalized_address;
+  if (!existingProperty && normalizedAddress && normalizedAddress.length > 10) {
     const { data } = await supabase.from('properties').select('id')
       .eq('normalized_address', listing.property.normalized_address).maybeSingle();
     existingProperty = data;
