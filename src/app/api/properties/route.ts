@@ -1,6 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabaseServer';
 
+interface PropertyItem {
+  id: string;
+  url: string | null;
+  title: string | null;
+  price: number;
+  priceMan: number;
+  scraped_at: string | null;
+  portal_site: { name: string; key: string } | null;
+  property_id: string | null;
+  address: string;
+  city: string | null;
+  building_area: number | null;
+  land_area: number | null;
+  built_year: number | null;
+  rooms: number | null;
+  property_type: string | null;
+  annual_revenue: number;
+  annual_revenue_man: number;
+  annual_profit: number;
+  annual_profit_man: number;
+  actual_multiple: number;
+  renovation_budget: number;
+  renovation_budget_man: number;
+  meets_condition: boolean;
+  has_simulation: boolean;
+  simulations: { id: string; scenario: string; annual_revenue: number | null; annual_profit: number | null }[];
+}
+
 export async function GET(request: NextRequest) {
   const supabase = await createSupabaseServer();
   const { searchParams } = new URL(request.url);
@@ -127,10 +155,10 @@ export async function GET(request: NextRequest) {
           simulations,
         };
       })
-      .filter(item => item && (showAll || includeNoSimulation || item.meets_condition)) as NonNullable<typeof allResults>[number][];
+      .filter((item): item is PropertyItem => item !== null && (showAll || includeNoSimulation || item.meets_condition));
 
     // ソート
-    const sortedResults = [...(allResults || [])].sort((a, b) => {
+    const sortedResults = [...allResults].sort((a, b) => {
       let aVal: number | string | null = null;
       let bVal: number | string | null = null;
 
