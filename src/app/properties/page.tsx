@@ -729,12 +729,16 @@ export default function PropertiesPage() {
                       {item.annual_profit_man.toLocaleString()}万円
                     </TableCell>
                     <TableCell className="text-right">
-                      <Badge 
-                        variant={item.actual_multiple <= 5 ? 'default' : 'secondary'}
-                        className={item.actual_multiple <= 5 ? 'bg-blue-600' : ''}
-                      >
-                        {item.actual_multiple.toFixed(1)}倍
-                      </Badge>
+                      {item.actual_multiple && isFinite(item.actual_multiple) ? (
+                        <Badge 
+                          variant={item.actual_multiple <= 5 ? 'default' : 'secondary'}
+                          className={item.actual_multiple <= 5 ? 'bg-blue-600' : ''}
+                        >
+                          {item.actual_multiple.toFixed(1)}倍
+                        </Badge>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {item.renovation_budget_man > 0 ? (
