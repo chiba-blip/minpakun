@@ -16,18 +16,17 @@ import { normalizeAddress, extractCity } from './normalize';
  */
 function extractPriceAthome(html: string): number | null {
   // アットホームの価格表示パターン（物件概要セクション）
-  // 「価格」ラベルの直後にある価格を取得
   const athomePatterns = [
-    // テーブル: |価格|X万円 or 価格|X万円
-    /[|｜]\s*価格\s*[|｜]\s*[\n\r]*([\d,]+)\s*万円/,
-    // HTML: <th>価格</th><td>X万円</td> パターン
+    // テーブル形式: | 価格 | の行の後に X万円
+    /[|｜]\s*価格\s*[|｜][\s\S]{0,50}?([\d,]+)\s*万円/,
+    // 価格ヘッダーの下に値
     /価格<\/t[hd]>\s*<t[hd][^>]*>\s*([\d,]+)\s*万円/i,
+    // 単独の価格表示（物件詳細部）
+    />\s*([\d,]+)\s*万円\s*</,
     // data属性やclass内の価格
     /data-price[^>]*>([\d,]+)\s*万円/i,
     // 価格クラス内
     /class="[^"]*price[^"]*"[^>]*>([\d,]+)\s*万円/i,
-    // 単独で「価格」の直後
-    />価格[^<]*<[^>]*>([\d,]+)\s*万円/,
   ];
   
   for (const p of athomePatterns) {
@@ -279,23 +278,33 @@ export class AthomeConnector implements Connector {
     // アットホームの住所パターン: 「所在地」の後に「北海道...」
     let address = null;
     const addressPatterns = [
-      /所在地[^北海道]*北海道([^<\|]+)/i,
-      /北海道[^\s,<\|]+市[^\s,<\|]+/,
-      /北海道[^\s,<\|]+町[^\s,<\|]*/,
-      /北海道[^\s,<\|]+村[^\s,<\|]*/,
+      // テーブル形式: 所在地 | 北海道XXX or 所在地｜北海道XXX
+      /所在地[|\s｜]+北海道([^\n|｜<]+)/i,
+      // 所在地の後に北海道（HTMLタグ間）
+      /所在地[^北海道]{0,20}北海道([^<\n]{3,50})/i,
+      // 単独の住所パターン
+      /北海道[^\s,<\|｜\n]+[市町村][^\s,<\|｜\n]*/,
     ];
     for (const p of addressPatterns) {
       const m = html.match(p);
       if (m) {
-        address = m[0].includes('所在地') ? `北海道${m[1].trim()}` : m[0].trim();
+        if (m[1]) {
+          address = `北海道${m[1].trim().replace(/\s+/g, '')}`;
+        } else {
+          address = m[0].trim().replace(/\s+/g, '');
+        }
         break;
       }
     }
     
-    // タイトル: h1またはページタイトルから
-    let title = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([^<]+)</i)?.[1]?.trim();
-    if (!title) title = html.match(/<title>([^<]+)</i)?.[1]?.split('|')[0]?.trim();
-    if (!title) title = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim();
+    // タイトル: ページタイトルから優先（より確実）
+    let title = html.match(/<title>([^<]+)</i)?.[1]?.replace(/[\[【].+$/, '').replace(/\s*\|.+$/, '').trim();
+    if (!title || title.includes('アットホーム')) {
+      title = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim();
+    }
+    if (!title) {
+      title = html.match(/<h1[^>]*class="[^"]*heading[^"]*"[^>]*>([^<]+)</i)?.[1]?.trim();
+    }
     
     // アットホーム専用の価格抽出（フォールバック付き）
     const price = extractPriceAthome(html) || extractPrice(html);
