@@ -33,6 +33,9 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   HOKKAIDO_AREAS,
@@ -93,6 +96,9 @@ interface ScrapeConfig {
   property_types: string[];
 }
 
+type SortKey = 'price' | 'annual_profit' | 'actual_multiple' | null;
+type SortOrder = 'asc' | 'desc';
+
 export default function PropertiesPage() {
   const [data, setData] = useState<PropertyResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,6 +106,10 @@ export default function PropertiesPage() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saving, setSaving] = useState(false);
+  
+  // ソート状態
+  const [sortKey, setSortKey] = useState<SortKey>(null);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
   // スクレイプ条件（選択肢の制限用）
   const [scrapeConfig, setScrapeConfig] = useState<ScrapeConfig>({
@@ -219,6 +229,67 @@ export default function PropertiesPage() {
     window.open(`/api/properties/csv?${params.toString()}`, '_blank');
   }
 
+  // ソート切り替え
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      // 同じキーの場合: asc → desc → null の順で切り替え
+      if (sortOrder === 'asc') {
+        setSortOrder('desc');
+      } else {
+        setSortKey(null);
+        setSortOrder('asc');
+      }
+    } else {
+      setSortKey(key);
+      setSortOrder('asc');
+    }
+  }
+
+  // ソート済みデータを取得
+  function getSortedItems(): PropertyItem[] {
+    if (!data?.items) return [];
+    if (!sortKey) return data.items;
+
+    return [...data.items].sort((a, b) => {
+      let valueA: number;
+      let valueB: number;
+
+      switch (sortKey) {
+        case 'price':
+          valueA = a.price;
+          valueB = b.price;
+          break;
+        case 'annual_profit':
+          valueA = a.annual_profit;
+          valueB = b.annual_profit;
+          break;
+        case 'actual_multiple':
+          valueA = a.actual_multiple;
+          valueB = b.actual_multiple;
+          break;
+        default:
+          return 0;
+      }
+
+      if (sortOrder === 'asc') {
+        return valueA - valueB;
+      } else {
+        return valueB - valueA;
+      }
+    });
+  }
+
+  // ソートアイコンを取得
+  function getSortIcon(key: SortKey) {
+    if (sortKey !== key) {
+      return <ArrowUpDown className="w-3 h-3 ml-1 opacity-50" />;
+    }
+    if (sortOrder === 'asc') {
+      return <ArrowUp className="w-3 h-3 ml-1" />;
+    }
+    return <ArrowDown className="w-3 h-3 ml-1" />;
+  }
+
   async function saveSearchCondition() {
     if (!saveName.trim()) return;
 
@@ -282,7 +353,7 @@ export default function PropertiesPage() {
           {/* 基本条件 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label>倍率（販売価格 ÷ 年間収益）</Label>
+              <Label>物件価格／想定利益</Label>
               <div className="flex items-center gap-2">
                 <Input
                   type="number"
@@ -588,10 +659,34 @@ export default function PropertiesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>物件名</TableHead>
-                  <TableHead className="text-right">販売価格</TableHead>
+                  <TableHead 
+                    className="text-right cursor-pointer hover:bg-gray-50 select-none"
+                    onClick={() => handleSort('price')}
+                  >
+                    <div className="flex items-center justify-end">
+                      販売価格
+                      {getSortIcon('price')}
+                    </div>
+                  </TableHead>
                   <TableHead className="text-right">想定売上</TableHead>
-                  <TableHead className="text-right">想定利益</TableHead>
-                  <TableHead className="text-right">倍率</TableHead>
+                  <TableHead 
+                    className="text-right cursor-pointer hover:bg-gray-50 select-none"
+                    onClick={() => handleSort('annual_profit')}
+                  >
+                    <div className="flex items-center justify-end">
+                      想定利益
+                      {getSortIcon('annual_profit')}
+                    </div>
+                  </TableHead>
+                  <TableHead 
+                    className="text-right cursor-pointer hover:bg-gray-50 select-none"
+                    onClick={() => handleSort('actual_multiple')}
+                  >
+                    <div className="flex items-center justify-end">
+                      <span className="whitespace-nowrap">価格／利益</span>
+                      {getSortIcon('actual_multiple')}
+                    </div>
+                  </TableHead>
                   <TableHead className="text-right">リノベ予算</TableHead>
                   <TableHead>所在地</TableHead>
                   <TableHead>面積</TableHead>
@@ -599,7 +694,7 @@ export default function PropertiesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.items.map((item) => (
+                {getSortedItems().map((item) => (
                   <TableRow key={item.id}>
                     <TableCell>
                       <div className="flex items-center gap-2">
