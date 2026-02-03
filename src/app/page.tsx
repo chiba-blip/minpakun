@@ -135,13 +135,16 @@ export default function DashboardPage() {
           : String(result.error);
         alert(`${siteName}の取得に失敗: ${errorMsg}`);
       } else {
-        const status = result.completed ? '（完了）' : '（継続中）';
+        const status = result.completed ? '（全エリア完了）' : '（継続中）';
+        const debugInfo = result.debug?.slice(0, 15).join('\n') || '';
         alert(`${siteName} ${status}
+
 取得: ${result.total_inserted || 0}件
 スキップ: ${result.total_skipped || 0}件
-エリア外: ${result.area_filtered || 0}件
-現在ページ: ${result.current_page || 0}
-候補数: ${result.candidates_found || 0}件`);
+候補数: ${result.candidates_found || 0}件
+
+デバッグ:
+${debugInfo}`);
       }
       
       await fetchAll();
