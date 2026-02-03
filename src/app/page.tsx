@@ -175,10 +175,12 @@ export default function DashboardPage() {
         
         // 進捗を確認
         const progress = scrapeProgress.filter(p => p.site_key === siteKey);
-        const allCompleted = progress.length > 0 && progress.every(p => p.status === 'completed');
+        const completedCount = progress.filter(p => p.status === 'completed').length;
+        const configuredAreaCount = stats?.configuredAreas?.length || 0;
         const totalInserted = progress.reduce((sum, p) => sum + p.inserted_count, 0);
         
-        // 完了チェック
+        // 完了チェック: 設定されたエリア数と完了数が一致するか
+        const allCompleted = configuredAreaCount > 0 && completedCount >= configuredAreaCount;
         if (allCompleted) {
           alert(`${siteName} 全エリア完了！\n\n取得: ${totalInserted}件`);
           break;
