@@ -155,6 +155,25 @@ export default function ScrapeSettingsPage() {
             '設定を保存'
           )}
         </Button>
+
+        <div className="mt-8 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-800 mb-2">
+            設定が正しく保存されない場合は、下のボタンで重複レコードを削除してください。
+          </p>
+          <Button 
+            variant="destructive" 
+            size="sm"
+            onClick={async () => {
+              if (!confirm('重複した設定レコードを削除しますか？')) return;
+              const res = await fetch('/api/debug/scrape-configs', { method: 'DELETE' });
+              const result = await res.json();
+              alert(`削除完了: ${result.deleted}件\n\nページを再読み込みしてください。`);
+              window.location.reload();
+            }}
+          >
+            重複レコードを削除
+          </Button>
+        </div>
       </div>
     </div>
   );
