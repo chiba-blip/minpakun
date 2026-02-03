@@ -4,9 +4,11 @@ import { createSupabaseServer } from '@/lib/supabaseServer';
 export async function GET() {
   const supabase = await createSupabaseServer();
   
+  // enabled=trueのレコードを取得（Background Functionと同じ条件）
   const { data, error } = await supabase
     .from('scrape_configs')
     .select('*')
+    .eq('enabled', true)
     .limit(1)
     .single();
 

@@ -264,13 +264,15 @@ export default async function handler(request: Request) {
             try {
               const detail = await connector.fetchDetail(candidateUrl);
               const normalized = connector.normalize(detail);
+              logInfo(`[scrape-background] Saving: ${normalized.title || candidateUrl}, price: ${normalized.price}, city: ${normalized.property.city}`);
               await saveListing(supabase, site.id, normalized);
               results.total_inserted++;
               areaInserted++;
+              logInfo(`[scrape-background] Saved successfully: ${candidateUrl}`);
               await throttle(DETAIL_THROTTLE_MS);
             } catch (detailError) {
               results.errors.push(`${candidateUrl}: ${detailError}`);
-              logError(`[scrape-background] Detail error: ${candidateUrl}`, { error: String(detailError) });
+              logError(`[scrape-background] Detail/Save error: ${candidateUrl}`, { error: String(detailError) });
             }
           }
 
@@ -401,29 +403,35 @@ async function saveListing(
   let propertyId: string;
   let existingProperty = null;
 
+  logInfo(`[saveListing] Starting: ${listing.url}`);
+
   // address_rawで検索
   if (listing.property.address_raw) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('properties')
       .select('id')
       .eq('address_raw', listing.property.address_raw)
       .maybeSingle();
+    if (error) logError(`[saveListing] Error searching by address_raw`, { error: error.message });
     existingProperty = data;
   }
 
   // normalized_addressで検索
   if (!existingProperty && listing.property.normalized_address && listing.property.normalized_address.length > 10) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('properties')
       .select('id')
       .eq('normalized_address', listing.property.normalized_address)
       .maybeSingle();
+    if (error) logError(`[saveListing] Error searching by normalized_address`, { error: error.message });
     existingProperty = data;
   }
 
   if (existingProperty) {
     propertyId = existingProperty.id;
+    logInfo(`[saveListing] Using existing property: ${propertyId}`);
   } else {
+    logInfo(`[saveListing] Creating new property...`);
     const { data: newProperty, error: propError } = await supabase
       .from('properties')
       .insert({
@@ -440,12 +448,15 @@ async function saveListing(
       .single();
 
     if (propError || !newProperty) {
+      logError(`[saveListing] Failed to insert property`, { error: propError?.message, listing: listing.property });
       throw new Error(`Failed to insert property: ${propError?.message}`);
     }
 
     propertyId = newProperty.id;
+    logInfo(`[saveListing] Created property: ${propertyId}`);
   }
 
+  logInfo(`[saveListing] Inserting listing for property ${propertyId}...`);
   const { error: listingError } = await supabase
     .from('listings')
     .insert({
