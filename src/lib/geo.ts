@@ -95,7 +95,13 @@ interface OverpassStation {
 export async function findNearestStation(
   lat: number,
   lng: number,
-  radiusM: number = 30000
+  radiusM: number = 30000,
+  options?: {
+    /** Overpass fetch timeout (ms) */
+    timeoutMs?: number;
+    /** 半径を段階的に拡大するか（サーバレスでは遅くなるのでfalse推奨） */
+    expandRadii?: boolean;
+  }
 ): Promise<{
   name: string;
   lat: number;
@@ -103,11 +109,12 @@ export async function findNearestStation(
   distance_m: number;
 } | null> {
   // 段階的に半径を拡大（道東・道北対応）
-  const radiusSteps = [radiusM, 50000, 80000];
+  const radiusSteps = options?.expandRadii === false ? [radiusM] : [radiusM, 50000, 80000];
+  const timeoutMs = options?.timeoutMs ?? 6000;
 
   for (const radius of radiusSteps) {
     const query = `
-[out:json][timeout:25];
+[out:json][timeout:10];
 (
   nwr(around:${radius},${lat},${lng})["railway"="station"];
 );
@@ -117,13 +124,17 @@ out center;
     const url = 'https://overpass-api.de/api/interpreter';
 
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
       });
+      clearTimeout(timer);
 
       if (!res.ok) {
         console.error(`Overpass API error: ${res.status}`);

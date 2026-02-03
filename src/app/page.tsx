@@ -61,13 +61,28 @@ export default function DashboardPage() {
       const res = await fetch(`/api/jobs/${job}`, {
         method: 'POST',
       });
-      const result = await res.json();
-      
+      const contentType = res.headers.get('content-type') || '';
+      const rawText = await res.text();
+      const parsed =
+        contentType.includes('application/json')
+          ? (() => {
+              try {
+                return JSON.parse(rawText) as Record<string, unknown>;
+              } catch {
+                return null;
+              }
+            })()
+          : null;
+
       if (!res.ok) {
-        const errorDetail = result.error || 'Unknown error';
+        const errorDetail =
+          (parsed?.error as string | undefined) ||
+          (parsed?.message as string | undefined) ||
+          `${res.status} ${res.statusText} / ${rawText.slice(0, 200)}`;
         alert(`${job}の実行に失敗しました: ${errorDetail}`);
-      } else if (result.message) {
-        alert(result.message);
+      } else {
+        const message = (parsed?.message as string | undefined) || '';
+        if (message) alert(message);
       }
       
       await fetchStats();

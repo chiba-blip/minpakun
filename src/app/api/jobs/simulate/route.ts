@@ -45,7 +45,8 @@ async function calculatePropertyRevenueAdjustment(params: {
     if (nearestStationCache.has(cacheKey)) {
       nearestStation = nearestStationCache.get(cacheKey) ?? null;
     } else {
-      const s = await findNearestStation(params.lat, params.lng);
+      // サーバレスでのタイムアウト回避: 半径拡大なし・短めタイムアウト
+      const s = await findNearestStation(params.lat, params.lng, 20000, { expandRadii: false, timeoutMs: 4000 });
       nearestStation = s ? { name: s.name, distance_m: s.distance_m } : null;
       nearestStationCache.set(cacheKey, nearestStation);
     }
