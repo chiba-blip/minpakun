@@ -207,16 +207,35 @@ export default async function handler(request: Request) {
         }
 
         try {
+          logInfo(`[scrape-background] Fetching URL: ${searchUrl}`);
+          
           // HTMLを取得
           const html = await fetchHtml(searchUrl);
           
-          // 物件IDを抽出
-          const pattern = /\/kodate\/(\d{10})(?:\/|\?)/g;
+          logInfo(`[scrape-background] HTML length: ${html.length}, URL: ${searchUrl}`);
+          
+          // 物件IDを抽出（複数のパターンを試す）
+          const pattern1 = /\/kodate\/(\d{10})(?:\/|\?)/g;
+          const pattern2 = /data-bukken-id="(\d+)"/g;
+          const pattern3 = /kodate\/(\d{7,12})/g;
+          
           const candidates: string[] = [];
-          for (const m of html.matchAll(pattern)) {
+          
+          // パターン1
+          for (const m of html.matchAll(pattern1)) {
             const candidateUrl = `https://www.athome.co.jp/kodate/${m[1]}/`;
             if (!candidates.includes(candidateUrl)) {
               candidates.push(candidateUrl);
+            }
+          }
+          
+          // パターン1で見つからない場合、パターン3を試す
+          if (candidates.length === 0) {
+            for (const m of html.matchAll(pattern3)) {
+              const candidateUrl = `https://www.athome.co.jp/kodate/${m[1]}/`;
+              if (!candidates.includes(candidateUrl)) {
+                candidates.push(candidateUrl);
+              }
             }
           }
 
