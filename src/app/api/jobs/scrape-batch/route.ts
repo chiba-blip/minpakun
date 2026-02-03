@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
     total_inserted: 0,
     total_skipped: 0,
     errors: [] as string[],
+    debug: [] as string[],  // デバッグ情報
     message: '',
     completed: false,
   };
@@ -152,12 +153,17 @@ export async function POST(request: NextRequest) {
 
         try {
           console.log(`[scrape-batch] Fetching: ${searchUrl}`);
+          results.debug.push(`Fetching: ${searchUrl}`);
+          
           const candidates = await connector.search({ 
             areas: [areaName], 
             propertyTypes: [], 
             maxPages: 1,
             customUrl: searchUrl,
           });
+
+          results.debug.push(`${areaName} page ${progress.current_page}: ${candidates.length} candidates found`);
+          console.log(`[scrape-batch] ${areaName} page ${progress.current_page}: ${candidates.length} candidates`);
 
           if (candidates.length === 0) {
             // ページに物件がない = 最終ページ到達
@@ -167,6 +173,7 @@ export async function POST(request: NextRequest) {
               completed_at: new Date().toISOString(),
               total_pages: progress.current_page - 1,
             });
+            results.debug.push(`${areaName}: completed (no more candidates)`);
             console.log(`[scrape-batch] Area completed: ${areaName}`);
             break;
           }

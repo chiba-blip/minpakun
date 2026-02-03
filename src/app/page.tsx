@@ -136,7 +136,8 @@ export default function DashboardPage() {
         alert(`${siteName}の取得に失敗: ${errorMsg}`);
       } else {
         const status = result.completed ? '（全エリア完了）' : '（継続中、再度クリックで続きを取得）';
-        alert(`${siteName}: ${result.total_inserted || 0}件取得 ${status}\n処理エリア: ${result.areas_processed?.join(', ') || 'なし'}`);
+        const debugInfo = result.debug?.length > 0 ? `\n\nデバッグ:\n${result.debug.slice(0, 10).join('\n')}` : '';
+        alert(`${siteName}: ${result.total_inserted || 0}件取得、${result.total_skipped || 0}件スキップ ${status}\n処理エリア: ${result.areas_processed?.join(', ') || 'なし'}${debugInfo}`);
       }
       
       await fetchAll();
