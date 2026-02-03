@@ -121,9 +121,17 @@ export default function DashboardPage() {
         method: 'POST' 
       });
       
+      console.log('Background function response:', res.status, res.statusText);
+      
       if (!res.ok && res.status !== 202) {
-        const text = await res.text();
-        alert(`${siteName}の開始に失敗: ${text.substring(0, 200)}`);
+        let errorDetail = `Status: ${res.status} ${res.statusText}`;
+        try {
+          const text = await res.text();
+          errorDetail += `\n${text.substring(0, 500)}`;
+        } catch {
+          // ignore
+        }
+        alert(`${siteName}の開始に失敗:\n${errorDetail}`);
         setTriggering(null);
         return;
       }

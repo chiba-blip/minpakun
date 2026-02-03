@@ -3,18 +3,17 @@
  * 最大15分間バックグラウンドで実行可能
  * 
  * 呼び出し: POST /.netlify/functions/scrape-background?site=athome
+ * 
+ * Background Functionとして動作させるには netlify.toml で
+ * [functions."scrape-background"]
+ *   type = "background"
+ * を設定する必要があります。
  */
-import type { Config } from '@netlify/functions';
 import { getSupabaseAdmin } from './_shared/supabase.mts';
 import { getConnector } from './_shared/connectors/index.mts';
 import type { NormalizedListing } from './_shared/connectors/types.mts';
 import { logInfo, logError } from './_shared/log.mts';
 import { throttle, fetchHtml } from './_shared/http.mts';
-
-// Netlify Background Function設定（15分まで実行可能）
-export const config: Config = {
-  path: '/.netlify/functions/scrape-background',
-};
 
 // 15分の制限に対して余裕を持たせる（14分）
 const MAX_TIME_MS = 14 * 60 * 1000;

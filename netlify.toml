@@ -37,6 +37,12 @@
 # Next.jsのAPIルートは@netlify/plugin-nextjsが自動処理するため
 # /api/* へのリダイレクトは不要
 
+# Background Functionへの直接アクセスを許可
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
 # 環境変数プレースホルダー（Netlify UIで設定）
 # NEXT_PUBLIC_SUPABASE_URL
 # NEXT_PUBLIC_SUPABASE_ANON_KEY
