@@ -524,21 +524,19 @@ export default function DashboardPage() {
                     テスト（5件）
                   </Button>
 
-                  {totalAreas > 0 && (
-                    <Button
-                      onClick={() => resetProgress(site.key, site.name)}
-                      disabled={!!triggering}
-                      variant="outline"
-                      size="sm"
-                    >
-                      {triggering === `reset-${site.key}` ? (
-                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                      ) : (
-                        <RotateCcw className="w-4 h-4 mr-1" />
-                      )}
-                      進捗リセット
-                    </Button>
-                  )}
+                  <Button
+                    onClick={() => resetProgress(site.key, site.name)}
+                    disabled={!!triggering}
+                    variant="outline"
+                    size="sm"
+                  >
+                    {triggering === `reset-${site.key}` ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-4 h-4 mr-1" />
+                    )}
+                    進捗リセット
+                  </Button>
 
                   <Button
                     onClick={() => deleteListings(site.key, site.name)}
