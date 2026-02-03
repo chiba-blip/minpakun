@@ -137,20 +137,27 @@ export async function POST(request: NextRequest) {
 
         console.log(`[simulate] Processing property ${property.id}, address_raw: ${property.address_raw}, hasAirROIKey: ${hasAirROIKey}`);
 
-        // AirROI APIが使用可能な場合は優先使用
-        if (hasAirROIKey && property.address_raw) {
-          try {
-            simResults = await runAirROISimulation(property, costs);
-            console.log(`[simulate] AirROI successfully used for property ${property.id}`);
-          } catch (airroiError) {
-            const errorMessage = airroiError instanceof Error ? airroiError.message : String(airroiError);
-            console.error(`[simulate] AirROI failed for property ${property.id}: ${errorMessage}`);
-            simResults = await runHeuristicsSimulation(property, costs);
-          }
-        } else {
-          // ヒューリスティクスにフォールバック
-          console.log(`[simulate] Using heuristics (address_raw: ${!!property.address_raw}, hasAirROIKey: ${hasAirROIKey})`);
-          simResults = await runHeuristicsSimulation(property, costs);
+        // AirROI APIのみ使用（ヒューリスティクスへのフォールバックなし）
+        if (!hasAirROIKey) {
+          console.log(`[simulate] Skipping property ${property.id}: AirROI API key not configured`);
+          results.errors.push(`Skipped: AirROI API key not configured`);
+          continue;
+        }
+        
+        if (!property.address_raw) {
+          console.log(`[simulate] Skipping property ${property.id}: No address available`);
+          results.errors.push(`Skipped ${property.id}: No address`);
+          continue;
+        }
+
+        try {
+          simResults = await runAirROISimulation(property, costs);
+          console.log(`[simulate] AirROI successfully used for property ${property.id}`);
+        } catch (airroiError) {
+          const errorMessage = airroiError instanceof Error ? airroiError.message : String(airroiError);
+          console.error(`[simulate] AirROI failed for property ${property.id}: ${errorMessage}`);
+          results.errors.push(`AirROI failed for ${property.id}: ${errorMessage}`);
+          continue; // スキップ（ヒューリスティクスは使わない）
         }
 
         for (const sim of simResults) {
