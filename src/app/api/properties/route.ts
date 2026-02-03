@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // リスティングとシミュレーションを結合して取得
+    // simulations は listing_id で紐付け（Supabaseは自動的にFKを認識）
     let query = supabase
       .from('listings')
       .select(`
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
           name,
           key
         ),
-        properties!inner (
+        properties (
           id,
           address_raw,
           normalized_address,
@@ -38,14 +39,14 @@ export async function GET(request: NextRequest) {
           rooms,
           property_type
         ),
-        simulations (
+        simulations!simulations_listing_id_fkey (
           id,
           scenario,
           annual_revenue,
           annual_profit
         )
       `)
-      .not('price', 'is', null)
+      .not('property_id', 'is', null)
       .order('scraped_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -72,6 +73,11 @@ export async function GET(request: NextRequest) {
       ?.map(listing => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const property = listing.properties as any;
+        
+        // propertyがない場合はスキップ
+        if (!property) {
+          return null;
+        }
 
         const simulations = listing.simulations as {
           id: string;

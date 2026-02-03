@@ -61,6 +61,51 @@ function extractNumber(html: string, pattern: RegExp): number | null {
   return m ? parseFloat(m[1]) : null;
 }
 
+/**
+ * アットホーム専用の建物面積抽出
+ * 複数のパターンに対応
+ */
+function extractBuildingAreaAthome(html: string): number | null {
+  const patterns = [
+    // テーブル形式: 建物面積</th><td>XXX.XX㎡ or m²
+    /建物面積<\/t[hd]>\s*<t[hd][^>]*>\s*([\d,.]+)\s*[㎡m²]/i,
+    // パイプ区切り形式（テキスト）
+    /建物面積[：:\s|｜]*([\d,.]+)\s*[㎡m²]/i,
+    // 一般的な形式
+    /建物面積[^<\d]*([\d,.]+)\s*[㎡m²]/i,
+    // m だけの場合
+    /建物面積[^<\d]*([\d,.]+)\s*m(?![²㎡a-zA-Z])/i,
+  ];
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m) {
+      const area = parseFloat(m[1].replace(/,/g, ''));
+      if (area > 0 && area < 10000) return area;
+    }
+  }
+  return null;
+}
+
+/**
+ * アットホーム専用の土地面積抽出
+ */
+function extractLandAreaAthome(html: string): number | null {
+  const patterns = [
+    /土地面積<\/t[hd]>\s*<t[hd][^>]*>\s*([\d,.]+)\s*[㎡m²]/i,
+    /土地面積[：:\s|｜]*([\d,.]+)\s*[㎡m²]/i,
+    /土地面積[^<\d]*([\d,.]+)\s*[㎡m²]/i,
+    /土地面積[^<\d]*([\d,.]+)\s*m(?![²㎡a-zA-Z])/i,
+  ];
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m) {
+      const area = parseFloat(m[1].replace(/,/g, ''));
+      if (area > 0 && area < 100000) return area;
+    }
+  }
+  return null;
+}
+
 function extractBuiltYear(html: string): number | null {
   const patterns = [
     /築[：:\s]*(\d{4})年/,
@@ -255,13 +300,17 @@ export class AthomeConnector implements Connector {
     // アットホーム専用の価格抽出（フォールバック付き）
     const price = extractPriceAthome(html) || extractPrice(html);
     
+    // アットホーム専用の面積抽出（フォールバック付き）
+    const buildingArea = extractBuildingAreaAthome(html) || extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/);
+    const landArea = extractLandAreaAthome(html) || extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/);
+    
     return {
       url,
       title: title || '物件名不明',
       price,
       address_raw: address,
-      building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
-      land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
+      building_area: buildingArea,
+      land_area: landArea,
       built_year: extractBuiltYear(html),
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
       property_type: '一戸建て',
