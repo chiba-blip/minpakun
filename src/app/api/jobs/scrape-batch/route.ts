@@ -5,9 +5,9 @@ import type { NormalizedListing } from '@/lib/scraper/types';
 import { throttle, fetchHtml } from '@/lib/scraper/http';
 import { getAthomeSearchUrl, ATHOME_AREA_SLUGS } from '@/lib/constants';
 
-// 設定
-const MAX_ITEMS_PER_RUN = 50;        // 1回の実行で処理する最大件数
-const MAX_TIME_MS = 13 * 60 * 1000;  // 13分
+// 設定（Netlify Functionsのタイムアウト対策）
+const MAX_ITEMS_PER_RUN = 5;         // 1回の実行で処理する最大件数（タイムアウト対策）
+const MAX_TIME_MS = 8 * 1000;        // 8秒（Netlifyのデフォルト10秒以内）
 const CONSECUTIVE_SKIP_THRESHOLD = 20;
 
 interface ScrapeProgress {

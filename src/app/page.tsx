@@ -111,47 +111,61 @@ export default function DashboardPage() {
     }
   }
 
-  // バッチスクレイピング（続きから取得、最大200件）
+  // バッチスクレイピング（繰り返し呼び出しで全件取得）
   async function scrapeBatch(siteKey: string, siteName: string) {
     setTriggering(`scrape-${siteKey}`);
+    let totalInserted = 0;
+    let totalSkipped = 0;
+    let loops = 0;
+    const maxLoops = 100; // 安全のため上限
+    
     try {
-      const res = await fetch(`/api/jobs/scrape-batch?site=${siteKey}&mode=initial`, { 
-        method: 'POST' 
-      });
-      
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await res.text();
-        console.error('Non-JSON response:', text.substring(0, 500));
-        alert(`${siteName}の取得に失敗: サーバーエラー\n${text.substring(0, 200)}`);
-        return;
-      }
-      
-      const result = await res.json();
-      
-      if (result.error) {
-        const errorMsg = typeof result.error === 'object' 
-          ? JSON.stringify(result.error) 
-          : String(result.error);
-        alert(`${siteName}の取得に失敗: ${errorMsg}`);
-      } else {
-        const status = result.completed ? '（全エリア完了）' : '（継続中）';
-        const debugInfo = result.debug?.slice(0, 15).join('\n') || '';
-        alert(`${siteName} ${status}
-
-取得: ${result.total_inserted || 0}件
-スキップ: ${result.total_skipped || 0}件
-候補数: ${result.candidates_found || 0}件
-
-デバッグ:
-${debugInfo}`);
+      while (loops < maxLoops) {
+        loops++;
+        
+        const res = await fetch(`/api/jobs/scrape-batch?site=${siteKey}&mode=initial`, { 
+          method: 'POST' 
+        });
+        
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await res.text();
+          console.error('Non-JSON response:', text.substring(0, 500));
+          alert(`${siteName}の取得に失敗: サーバーエラー\n${text.substring(0, 200)}`);
+          break;
+        }
+        
+        const result = await res.json();
+        
+        if (result.error) {
+          alert(`${siteName}の取得に失敗: ${result.error}`);
+          break;
+        }
+        
+        totalInserted += result.total_inserted || 0;
+        totalSkipped += result.total_skipped || 0;
+        
+        // 完了したら終了
+        if (result.completed) {
+          alert(`${siteName} 全エリア完了！\n\n取得: ${totalInserted}件\nスキップ: ${totalSkipped}件`);
+          break;
+        }
+        
+        // 進捗がなければ終了（無限ループ防止）
+        if (result.total_inserted === 0 && result.total_skipped === 0 && result.candidates_found === 0) {
+          alert(`${siteName} 処理完了\n\n取得: ${totalInserted}件\nスキップ: ${totalSkipped}件`);
+          break;
+        }
+        
+        // 短い待機
+        await new Promise(r => setTimeout(r, 500));
       }
       
       await fetchAll();
     } catch (error) {
       console.error(`Failed to scrape ${siteKey}:`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
-      alert(`${siteName}の取得に失敗: ${errorMsg}`);
+      alert(`${siteName}の取得に失敗: ${errorMsg}\n\nこれまでの取得: ${totalInserted}件`);
     } finally {
       setTriggering(null);
     }
