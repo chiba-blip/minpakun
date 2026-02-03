@@ -190,6 +190,11 @@ export class HokkaidoRengotaiConnector implements Connector {
     const html = await fetchHtml(url);
     const transportInfo = this.extractTransport(html);
     
+    logInfo(`[${this.key}] Transport info extracted`, { 
+      nearest_station: transportInfo.text, 
+      walk_minutes: transportInfo.walkMinutes 
+    });
+    
     const detail: ListingDetail = {
       url,
       title: this.extractTitle(html),
@@ -404,39 +409,46 @@ export class HokkaidoRengotaiConnector implements Connector {
 
   /**
    * 交通情報を抽出
-   * <span class="st_name">中央バス「祝津3丁目」停 </span>
-   * <span class="st_distance "><strong>徒歩1分</strong></span>
    */
   private extractTransport(html: string): { text: string | null; walkMinutes: number | null } {
-    // st_nameから駅名・バス停名を取得
+    // パターン1: st_nameクラスから取得
     const stationMatch = html.match(/<span class="st_name">([^<]+)<\/span>/i);
-    // st_distanceから徒歩分数を取得
-    const distanceMatch = html.match(/<span class="st_distance[^"]*">[\s\S]*?徒歩(\d+)分/i);
+    const distanceMatch = html.match(/徒歩(\d+)分/i);
+    
+    logInfo(`[extractTransport] stationMatch: ${stationMatch ? stationMatch[1] : 'null'}, distanceMatch: ${distanceMatch ? distanceMatch[1] : 'null'}`);
     
     if (stationMatch) {
       const stationName = stationMatch[1].trim();
       const walkMinutes = distanceMatch ? parseInt(distanceMatch[1], 10) : null;
-      
-      // 交通テキストを組み立て
-      let transportText = stationName;
-      if (walkMinutes !== null) {
-        transportText += ` 徒歩${walkMinutes}分`;
-      }
-      
+      const transportText = walkMinutes !== null ? `${stationName} 徒歩${walkMinutes}分` : stationName;
+      logInfo(`[extractTransport] Found: ${transportText}`);
       return { text: transportText, walkMinutes };
     }
     
-    // フォールバック: th/tdパターン
-    const thTdMatch = html.match(/交通<\/th>[\s\S]*?<td[^>]*>([^<]+)</i);
-    if (thTdMatch && thTdMatch[1]) {
-      const text = thTdMatch[1].trim();
-      const walkMatch = text.match(/徒歩(\d+)分/);
-      return {
-        text,
-        walkMinutes: walkMatch ? parseInt(walkMatch[1], 10) : null,
-      };
+    // パターン2: rd_list_station内のテキストを取得
+    const listMatch = html.match(/<ul class="rd_list_station">([\s\S]*?)<\/ul>/i);
+    if (listMatch) {
+      // タグを除去してテキストのみ抽出
+      const text = listMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      logInfo(`[extractTransport] List pattern found: ${text}`);
+      if (text) {
+        const walkMatch = text.match(/徒歩(\d+)分/);
+        return { text, walkMinutes: walkMatch ? parseInt(walkMatch[1], 10) : null };
+      }
     }
     
+    // パターン3: 交通セクション全体からテキスト抽出
+    const sectionMatch = html.match(/id="stArea">交通<\/h2>([\s\S]*?)(?:<h2|<\/section)/i);
+    if (sectionMatch) {
+      const text = sectionMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      logInfo(`[extractTransport] Section pattern found: ${text}`);
+      if (text) {
+        const walkMatch = text.match(/徒歩(\d+)分/);
+        return { text, walkMinutes: walkMatch ? parseInt(walkMatch[1], 10) : null };
+      }
+    }
+    
+    logInfo(`[extractTransport] No transport info found`);
     return { text: null, walkMinutes: null };
   }
 

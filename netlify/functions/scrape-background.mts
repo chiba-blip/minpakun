@@ -628,7 +628,7 @@ async function saveListing(
     propertyId = existingProperty.id;
     logInfo(`[saveListing] Using existing property: ${propertyId}`);
   } else {
-    logInfo(`[saveListing] Creating new property...`);
+    logInfo(`[saveListing] Creating new property with nearest_station: ${listing.property.nearest_station}, walk_minutes: ${listing.property.walk_minutes}`);
     const { data: newProperty, error: propError } = await supabase
       .from('properties')
       .insert({
