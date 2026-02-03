@@ -249,7 +249,10 @@ export default function DashboardPage() {
       if (result.success) {
         alert(`${siteName}のスクレイピングを中止しました`);
       } else {
-        alert(`中止に失敗: ${result.error}`);
+        const errorMsg = typeof result.error === 'object' 
+          ? JSON.stringify(result.error) 
+          : result.error;
+        alert(`中止に失敗: ${errorMsg}`);
       }
       await fetchAll();
     } catch (error) {
