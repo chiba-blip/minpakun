@@ -199,7 +199,9 @@ export class SuumoConnector implements Connector {
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
-      property_type: '一戸建て',
+      units: 1,  // 中古戸建ては常に1戸
+      num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      property_type: '中古戸建て',
       external_id: url.match(/__JJ_([^/]+)/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -215,6 +217,7 @@ export class SuumoConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };
@@ -336,7 +339,9 @@ export class AthomeConnector implements Connector {
       land_area: landArea,
       built_year: extractBuiltYear(html),
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
-      property_type: '一戸建て',
+      units: 1,  // 中古戸建ては常に1戸
+      num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      property_type: '中古戸建て',
       external_id: url.match(/\/kodate\/(\d{10})\//)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -352,6 +357,7 @@ export class AthomeConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };
@@ -448,7 +454,9 @@ export class HomesConnector implements Connector {
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
-      property_type: '一戸建て',
+      units: 1,  // 中古戸建ては常に1戸
+      num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      property_type: '中古戸建て',
       external_id: url.match(/b-(\d+)/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -464,6 +472,7 @@ export class HomesConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };
@@ -522,6 +531,11 @@ export class KenbiyaConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    const propertyType = detectPropertyType(html) || '一棟集合住宅';
+    const isKodate = propertyType.includes('戸建');
+    const totalUnits = extractNumber(html, /総戸数[^<]*(\d+)/);
+    const numRoomsFromLayout = extractNumber(html, /(\d+)[SLDK]+/);
+    
     return {
       url,
       title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
@@ -530,8 +544,10 @@ export class KenbiyaConnector implements Connector {
       building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
-      rooms: extractNumber(html, /総戸数[^<]*(\d+)/) || 1,
-      property_type: detectPropertyType(html) || '一戸建て',
+      rooms: isKodate ? numRoomsFromLayout : totalUnits,  // 後方互換性
+      units: isKodate ? 1 : (totalUnits || 1),  // 戸建=1、集合=総戸数
+      num_rooms: isKodate ? numRoomsFromLayout : null,  // 戸建=間取り、集合=null
+      property_type: propertyType,
       external_id: url.match(/\/property\/(\d+)\//)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -547,6 +563,7 @@ export class KenbiyaConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };
@@ -608,6 +625,11 @@ export class RakumachiConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    const propertyType = detectPropertyType(html) || '一棟集合住宅';
+    const isKodate = propertyType.includes('戸建');
+    const totalUnits = extractNumber(html, /総戸数[^<]*(\d+)/);
+    const numRoomsFromLayout = extractNumber(html, /(\d+)[SLDK]+/);
+    
     return {
       url,
       title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
@@ -616,8 +638,10 @@ export class RakumachiConnector implements Connector {
       building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
-      rooms: extractNumber(html, /総戸数[^<]*(\d+)/) || 1,
-      property_type: detectPropertyType(html) || '一戸建て',
+      rooms: isKodate ? numRoomsFromLayout : totalUnits,  // 後方互換性
+      units: isKodate ? 1 : (totalUnits || 1),  // 戸建=1、集合=総戸数
+      num_rooms: isKodate ? numRoomsFromLayout : null,  // 戸建=間取り、集合=null
+      property_type: propertyType,
       external_id: url.match(/\/(\d+)\/show\.html/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -633,6 +657,7 @@ export class RakumachiConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };
@@ -705,7 +730,9 @@ export class HokkaidoRengotaiConnector implements Connector {
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
-      property_type: '一戸建て',
+      units: 1,  // 中古戸建ては常に1戸
+      num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      property_type: '中古戸建て',
       external_id: url.match(/\/(\d+)\/?$/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -721,6 +748,7 @@ export class HokkaidoRengotaiConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };
@@ -794,7 +822,9 @@ export class HousedoConnector implements Connector {
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
-      property_type: '一戸建て',
+      units: 1,  // 中古戸建ては常に1戸
+      num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      property_type: '中古戸建て',
       external_id: url.match(/detail\/(\d+)/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -810,6 +840,7 @@ export class HousedoConnector implements Connector {
         city: extractCity(detail.address_raw || ''),
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
+        units: detail.units, num_rooms: detail.num_rooms,
         property_type: detail.property_type,
       },
     };

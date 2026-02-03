@@ -24,7 +24,9 @@ export interface ListingDetail {
   building_area: number | null;
   land_area: number | null;
   built_year: number | null;
-  rooms: number | null;
+  rooms: number | null;       // 後方互換性のため残す
+  units: number | null;       // 戸数（中古戸建=1、集合住宅=戸数）
+  num_rooms: number | null;   // 部屋数（中古戸建=間取りから、集合住宅=null）
   property_type: string | null;
   images?: string[];
   description?: string;
@@ -45,7 +47,9 @@ export interface NormalizedListing {
     building_area: number | null;
     land_area: number | null;
     built_year: number | null;
-    rooms: number | null;
+    rooms: number | null;       // 後方互換性のため残す
+    units: number | null;       // 戸数
+    num_rooms: number | null;   // 部屋数
     property_type: string | null;
   };
 }

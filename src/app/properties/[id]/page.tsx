@@ -27,6 +27,7 @@ import {
   Ruler,
   DoorOpen,
   Train,
+  Home,
 } from 'lucide-react';
 
 interface MonthlyData {
@@ -81,6 +82,8 @@ interface PropertyDetail {
     land_area: number | null;
     built_year: number | null;
     rooms: number | null;
+    units: number | null;
+    num_rooms: number | null;
     property_type: string | null;
     nearest_station: string | null;
     walk_minutes: number | null;
@@ -285,10 +288,17 @@ export default function PropertyDetailPage() {
                 </div>
               </div>
               <div className="flex items-start gap-2">
+                <Home className="w-4 h-4 mt-1 text-gray-400" />
+                <div>
+                  <div className="text-sm text-gray-500">戸数</div>
+                  <div>{data.property.units ?? '-'}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
                 <DoorOpen className="w-4 h-4 mt-1 text-gray-400" />
                 <div>
-                  <div className="text-sm text-gray-500">部屋数/戸数</div>
-                  <div>{data.property.rooms ?? '-'}</div>
+                  <div className="text-sm text-gray-500">部屋数</div>
+                  <div>{data.property.num_rooms ?? '-'}</div>
                 </div>
               </div>
               <div className="flex items-start gap-2">

@@ -33,6 +33,8 @@ export async function GET(
           land_area,
           built_year,
           rooms,
+          units,
+          num_rooms,
           property_type,
           lat,
           lng
@@ -96,6 +98,8 @@ export async function GET(
         land_area: property.land_area,
         built_year: property.built_year,
         rooms: property.rooms,
+        units: property.units ?? (property.property_type?.includes('戸建') ? 1 : property.rooms),
+        num_rooms: property.num_rooms ?? null,
         property_type: property.property_type,
         nearest_station: property?.nearest_station ?? null,
         walk_minutes: property?.walk_minutes ?? null,

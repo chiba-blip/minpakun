@@ -196,6 +196,8 @@ async function saveListing(
         land_area: listing.property.land_area,
         built_year: listing.property.built_year,
         rooms: listing.property.rooms,
+        units: listing.property.units,
+        num_rooms: listing.property.num_rooms,
         property_type: listing.property.property_type,
       })
       .select('id')
