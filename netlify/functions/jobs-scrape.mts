@@ -35,16 +35,20 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
       return { statusCode: 200, body: JSON.stringify({ message: 'No enabled sites' }) };
     }
 
-    // 2. スクレイプ設定を取得
+    // 2. スクレイプ設定を取得（最初のレコードを使用）
     const { data: configs, error: configError } = await supabase
       .from('scrape_configs')
       .select('*')
-      .eq('enabled', true)
+      .order('created_at', { ascending: true })
       .limit(1)
       .single();
 
     if (configError || !configs) {
       throw new Error(`Failed to fetch scrape_configs: ${configError?.message}`);
+    }
+    
+    if (!configs.enabled) {
+      return { statusCode: 200, body: JSON.stringify({ message: 'Scraping disabled' }) };
     }
 
     const searchParams: SearchParams = {

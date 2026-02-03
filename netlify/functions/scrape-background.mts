@@ -126,13 +126,17 @@ export default async function handler(request: Request) {
       throw new Error(`ポータルサイト「${targetSite}」が見つからないか無効です`);
     }
 
-    // 2. スクレイプ条件を取得
+    // 2. スクレイプ条件を取得（最初のレコードを使用）
     const { data: scrapeConfig } = await supabase
       .from('scrape_configs')
-      .select('areas, property_types')
-      .eq('enabled', true)
+      .select('areas, property_types, enabled')
+      .order('created_at', { ascending: true })
       .limit(1)
       .single();
+    
+    if (!scrapeConfig?.enabled) {
+      throw new Error('スクレイプが無効化されています');
+    }
     
     const targetAreas: string[] = scrapeConfig?.areas || [];
     results.areas_total = targetAreas.length;

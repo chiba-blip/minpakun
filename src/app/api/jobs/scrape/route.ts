@@ -40,11 +40,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(results);
     }
 
-    // 2. スクレイプ条件を取得（エリアフィルタリング用）
+    // 2. スクレイプ条件を取得（最初のレコードを使用）
     const { data: scrapeConfig } = await supabase
       .from('scrape_configs')
-      .select('areas')
-      .eq('enabled', true)
+      .select('areas, enabled')
+      .order('created_at', { ascending: true })
       .limit(1)
       .single();
     

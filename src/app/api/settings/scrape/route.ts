@@ -4,15 +4,16 @@ import { createSupabaseServer } from '@/lib/supabaseServer';
 export async function GET() {
   const supabase = await createSupabaseServer();
   
-  // enabled=trueのレコードを取得（Background Functionと同じ条件）
+  // 最初のレコードを取得（1つしかない想定）
   const { data, error } = await supabase
     .from('scrape_configs')
     .select('*')
-    .eq('enabled', true)
+    .order('created_at', { ascending: true })
     .limit(1)
     .single();
 
   if (error) {
+    console.error('[scrape settings] GET error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -24,10 +25,20 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const { id, enabled, areas, property_types } = body;
 
-  console.log('[scrape settings] PUT request:', { id, enabled, areas, property_types });
+  // idがない場合は最初のレコードを取得して更新
+  let targetId = id;
+  if (!targetId) {
+    const { data: existing } = await supabase
+      .from('scrape_configs')
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
+    targetId = existing?.id;
+  }
 
-  if (!id) {
-    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  if (!targetId) {
+    return NextResponse.json({ error: 'レコードが見つかりません' }, { status: 404 });
   }
 
   const updateData: Record<string, unknown> = {};
@@ -35,12 +46,10 @@ export async function PUT(request: NextRequest) {
   if (areas !== undefined) updateData.areas = areas;
   if (property_types !== undefined) updateData.property_types = property_types;
 
-  console.log('[scrape settings] Updating with:', updateData);
-
   const { data, error } = await supabase
     .from('scrape_configs')
     .update(updateData)
-    .eq('id', id)
+    .eq('id', targetId)
     .select()
     .single();
 
@@ -49,6 +58,5 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  console.log('[scrape settings] Updated successfully:', data);
   return NextResponse.json(data);
 }

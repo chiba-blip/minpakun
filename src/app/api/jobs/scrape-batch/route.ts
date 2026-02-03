@@ -57,13 +57,18 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    // 1. スクレイプ条件を取得
+    // 1. スクレイプ条件を取得（最初のレコードを使用）
     const { data: scrapeConfig } = await supabase
       .from('scrape_configs')
-      .select('areas, property_types')
-      .eq('enabled', true)
+      .select('areas, property_types, enabled')
+      .order('created_at', { ascending: true })
       .limit(1)
       .single();
+    
+    if (!scrapeConfig?.enabled) {
+      results.message = 'スクレイプが無効化されています';
+      return NextResponse.json(results);
+    }
 
     const targetAreas: string[] = scrapeConfig?.areas || [];
     results.target_areas = targetAreas;
