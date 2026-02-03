@@ -15,11 +15,11 @@ export async function GET() {
       .from('listings')
       .select('*', { count: 'exact', head: true });
 
-    // シミュレーション済み（ユニークなproperty_id数）
+    // シミュレーション済み掲載情報数（ユニークなlisting_id数）
     const { data: simData } = await supabase
       .from('simulations')
-      .select('property_id');
-    const simulatedCount = new Set(simData?.map(s => s.property_id)).size;
+      .select('listing_id');
+    const simulatedCount = new Set(simData?.map(s => s.listing_id).filter(Boolean)).size;
 
     // 条件適合物件（価格 < 年間収益 × 7）
     const { data: matchData } = await supabase

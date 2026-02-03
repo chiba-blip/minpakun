@@ -148,12 +148,28 @@ async function saveListing(
   // 1. property を検索 or 作成
   let propertyId: string;
 
-  // 既存の物件を住所で検索
-  const { data: existingProperty } = await supabase
-    .from('properties')
-    .select('id')
-    .eq('normalized_address', listing.property.normalized_address)
-    .single();
+  // 既存の物件を住所で検索（address_raw を優先、なければ normalized_address）
+  let existingProperty = null;
+  
+  // まず address_raw で検索（より正確）
+  if (listing.property.address_raw) {
+    const { data } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('address_raw', listing.property.address_raw)
+      .maybeSingle();
+    existingProperty = data;
+  }
+  
+  // address_raw で見つからない場合、normalized_address で検索（空文字は除外）
+  if (!existingProperty && listing.property.normalized_address && listing.property.normalized_address.length > 10) {
+    const { data } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('normalized_address', listing.property.normalized_address)
+      .maybeSingle();
+    existingProperty = data;
+  }
 
   if (existingProperty) {
     propertyId = existingProperty.id;
