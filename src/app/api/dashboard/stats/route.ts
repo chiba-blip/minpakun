@@ -5,17 +5,15 @@ export async function GET() {
   const supabase = await createSupabaseServer();
 
   try {
-    // 総物件数
-    const { count: totalProperties } = await supabase
-      .from('properties')
-      .select('*', { count: 'exact', head: true });
-
-    // 総リスティング数
+    // 総リスティング数（全ポータルの合計）
     const { count: totalListings } = await supabase
       .from('listings')
       .select('*', { count: 'exact', head: true });
 
-    // シミュレーション済み掲載情報数（ユニークなlisting_id数）
+    // 総物件数 = 総リスティング数として表示（ユーザーにとってわかりやすい）
+    const totalProperties = totalListings;
+
+    // シミュレーション済み件数（listing_idでユニーク）
     const { data: simData } = await supabase
       .from('simulations')
       .select('listing_id');
