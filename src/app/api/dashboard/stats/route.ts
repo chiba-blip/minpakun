@@ -47,12 +47,20 @@ export async function GET() {
       .limit(1)
       .single();
 
+    // スクレイプ設定（エリア数）
+    const { data: scrapeConfig } = await supabase
+      .from('scrape_configs')
+      .select('areas')
+      .limit(1)
+      .single();
+
     return NextResponse.json({
       totalProperties: totalProperties ?? 0,
       totalListings: totalListings ?? 0,
       simulatedCount,
       matchingCount,
       lastScrapeAt: lastScrape?.scraped_at ?? null,
+      configuredAreas: scrapeConfig?.areas ?? [],
     });
   } catch (error) {
     console.error('Failed to fetch dashboard stats:', error);

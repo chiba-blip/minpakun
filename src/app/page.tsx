@@ -24,6 +24,7 @@ interface DashboardStats {
   simulatedCount: number;
   matchingCount: number;
   lastScrapeAt: string | null;
+  configuredAreas: string[];
 }
 
 interface PortalSiteStat {
@@ -601,7 +602,8 @@ export default function DashboardPage() {
         {portalStats.map((site) => {
           const progress = getSiteProgress(site.key);
           const completedAreas = progress.filter(p => p.status === 'completed').length;
-          const totalAreas = progress.length;
+          // 設定されたエリア数を使用（進捗レコードがまだ作成されていない場合に対応）
+          const totalAreas = stats?.configuredAreas?.length || progress.length;
           const inProgress = progress.some(p => p.status === 'in_progress');
           
           return (
