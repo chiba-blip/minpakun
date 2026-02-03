@@ -21,6 +21,19 @@ interface DashboardStats {
   lastScrapeAt: string | null;
 }
 
+interface ScrapeProgress {
+  id: string;
+  site_key: string;
+  area_key: string;
+  area_name: string;
+  current_page: number;
+  total_pages: number | null;
+  processed_count: number;
+  inserted_count: number;
+  status: string;
+  mode: string;
+}
+
 // スクレイプ対象サイト
 const SCRAPE_SITES = [
   { key: 'athome', name: 'アットホーム' },
@@ -36,9 +49,11 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [scrapeProgress, setScrapeProgress] = useState<ScrapeProgress[]>([]);
 
   useEffect(() => {
     fetchStats();
+    fetchScrapeProgress();
   }, []);
 
   async function fetchStats() {
@@ -52,6 +67,18 @@ export default function DashboardPage() {
       console.error('Failed to fetch stats:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchScrapeProgress() {
+    try {
+      const res = await fetch('/api/scrape-progress');
+      if (res.ok) {
+        const data = await res.json();
+        setScrapeProgress(data.progress || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch scrape progress:', error);
     }
   }
 
@@ -211,27 +238,39 @@ export default function DashboardPage() {
     }
   }
 
-  async function scrapeBulk(siteKey: string, siteName: string) {
-    setTriggering(`bulk-${siteKey}`);
+  async function scrapeBatch(siteKey: string, siteName: string, mode: 'initial' | 'incremental' = 'initial', reset: boolean = false) {
+    setTriggering(`batch-${siteKey}`);
     try {
-      const res = await fetch(`/.netlify/functions/scrape-background?site=${siteKey}`, {
+      const params = new URLSearchParams({ site: siteKey, mode });
+      if (reset) params.set('reset', 'true');
+      
+      const res = await fetch(`/api/jobs/scrape-batch?${params.toString()}`, {
         method: 'POST',
       });
       
       const result = await res.json();
-      if (result.success || result.inserted !== undefined) {
-        alert(`${siteName}: ${result.inserted || 0}件取得、${result.skipped || 0}件スキップ\n\n全データ取得には複数回実行してください。`);
+      if (result.error) {
+        alert(`${siteName}の取得に失敗: ${result.error}`);
       } else {
-        alert(`${siteName}の取得に失敗: ${result.error || '不明なエラー'}`);
+        const status = result.completed ? '（全エリア完了）' : '（継続中）';
+        alert(`${siteName}: ${result.total_inserted || 0}件取得、${result.total_skipped || 0}件スキップ ${status}\n\n処理エリア: ${result.areas_processed?.join(', ') || 'なし'}`);
       }
       
       await fetchStats();
+      await fetchScrapeProgress();
     } catch (error) {
-      console.error(`Failed to bulk scrape ${siteKey}:`, error);
+      console.error(`Failed to batch scrape ${siteKey}:`, error);
       alert(`${siteName}の取得に失敗しました`);
     } finally {
       setTriggering(null);
     }
+  }
+
+  async function resetScrapeProgress(siteKey: string) {
+    if (!confirm(`${siteKey}のスクレイプ進捗をリセットしますか？最初から取得し直します。`)) {
+      return;
+    }
+    await scrapeBatch(siteKey, 'アットホーム', 'initial', true);
   }
 
   if (loading) {
@@ -310,33 +349,86 @@ export default function DashboardPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Zap className="w-5 h-5 text-blue-600" />
-            バッチスクレイピング
+            バッチスクレイピング（自動実行中）
           </CardTitle>
           <CardDescription>
-            1回で10件ずつ取得。全データ取得には複数回クリックしてください
+            毎時自動実行。手動でも実行可能です。全エリア完了後は週1回の差分更新に切り替わります。
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* 進捗表示 */}
+          {scrapeProgress.length > 0 && (
+            <div className="bg-white rounded-lg p-3 border">
+              <h4 className="text-sm font-medium mb-2">アットホーム進捗</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                {scrapeProgress.map((p) => (
+                  <div 
+                    key={p.id} 
+                    className={`p-2 rounded ${
+                      p.status === 'completed' ? 'bg-green-50 text-green-700' :
+                      p.status === 'in_progress' ? 'bg-blue-50 text-blue-700' :
+                      p.status === 'error' ? 'bg-red-50 text-red-700' :
+                      'bg-gray-50 text-gray-700'
+                    }`}
+                  >
+                    <div className="font-medium">{p.area_name}</div>
+                    <div>
+                      {p.status === 'completed' ? '✓ 完了' :
+                       p.status === 'in_progress' ? `📄 ${p.current_page}ページ目` :
+                       p.status === 'error' ? '❌ エラー' :
+                       '⏳ 待機中'}
+                    </div>
+                    <div className="text-gray-500">{p.inserted_count}件取得</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                合計: {scrapeProgress.reduce((sum, p) => sum + p.inserted_count, 0)}件取得済み
+              </div>
+            </div>
+          )}
+
+          {/* 手動実行ボタン */}
           <div className="flex flex-wrap gap-2">
-            {SCRAPE_SITES.map((site) => (
-              <Button
-                key={`bulk-${site.key}`}
-                onClick={() => scrapeBulk(site.key, site.name)}
-                disabled={!!triggering}
-                variant="default"
-                size="sm"
-              >
-                {triggering === `bulk-${site.key}` ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Zap className="w-4 h-4 mr-2" />
-                )}
-                {site.name}
-              </Button>
-            ))}
+            <Button
+              onClick={() => scrapeBatch('athome', 'アットホーム', 'initial')}
+              disabled={!!triggering}
+              variant="default"
+              size="sm"
+            >
+              {triggering === 'batch-athome' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Zap className="w-4 h-4 mr-2" />
+              )}
+              アットホーム（続きから）
+            </Button>
+            <Button
+              onClick={() => scrapeBatch('athome', 'アットホーム', 'incremental')}
+              disabled={!!triggering}
+              variant="outline"
+              size="sm"
+            >
+              {triggering === 'batch-athome' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Zap className="w-4 h-4 mr-2" />
+              )}
+              新着のみ取得
+            </Button>
+            <Button
+              onClick={() => resetScrapeProgress('athome')}
+              disabled={!!triggering}
+              variant="outline"
+              size="sm"
+              className="text-orange-600 border-orange-300 hover:bg-orange-50"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              進捗リセット
+            </Button>
           </div>
-          <p className="text-xs text-gray-500 mt-3">
-            ※ Netlify無料プランのため1回10件制限。何度もクリックして全件取得してください
+          <p className="text-xs text-gray-500">
+            ※ 「続きから」: 前回の続きからスクレイプ。「新着のみ」: 既存物件が連続したら終了。「進捗リセット」: 最初からやり直し。
           </p>
         </CardContent>
       </Card>

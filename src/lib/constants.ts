@@ -154,3 +154,110 @@ export const BUILDING_AREA_OPTIONS = [
 // 型定義
 export type HokkaidoArea = typeof HOKKAIDO_AREAS[number]['value'];
 export type PropertyType = typeof PROPERTY_TYPES[number]['value'];
+
+// ========================================
+// アットホーム エリア→URLスラッグ マッピング
+// URL形式: /kodate/chuko/hokkaido/{slug}/list/
+// ========================================
+export const ATHOME_AREA_SLUGS: Record<string, string> = {
+  // 札幌市
+  '札幌市': 'sapporo-city',
+  '札幌市中央区': 'chuo-ku-sapporo-city',
+  '札幌市北区': 'kita-ku-sapporo-city',
+  '札幌市東区': 'higashi-ku-sapporo-city',
+  '札幌市白石区': 'shiroishi-ku-sapporo-city',
+  '札幌市豊平区': 'toyohira-ku-sapporo-city',
+  '札幌市南区': 'minami-ku-sapporo-city',
+  '札幌市西区': 'nishi-ku-sapporo-city',
+  '札幌市厚別区': 'atsubetsu-ku-sapporo-city',
+  '札幌市手稲区': 'teine-ku-sapporo-city',
+  '札幌市清田区': 'kiyota-ku-sapporo-city',
+  // 主要都市
+  '小樽市': 'otaru-city',
+  '旭川市': 'asahikawa-city',
+  '函館市': 'hakodate-city',
+  '釧路市': 'kushiro-city',
+  '帯広市': 'obihiro-city',
+  '北見市': 'kitami-city',
+  '苫小牧市': 'tomakomai-city',
+  '千歳市': 'chitose-city',
+  '江別市': 'ebetsu-city',
+  '室蘭市': 'muroran-city',
+  '岩見沢市': 'iwamizawa-city',
+  '恵庭市': 'eniwa-city',
+  '北広島市': 'kitahiroshima-city',
+  '石狩市': 'ishikari-city',
+  '登別市': 'noboribetsu-city',
+  '網走市': 'abashiri-city',
+  '稚内市': 'wakkanai-city',
+  '紋別市': 'monbetsu-city',
+  '名寄市': 'nayoro-city',
+  '根室市': 'nemuro-city',
+  '滝川市': 'takikawa-city',
+  '砂川市': 'sunagawa-city',
+  '深川市': 'fukagawa-city',
+  '富良野市': 'furano-city',
+  '留萌市': 'rumoi-city',
+  '美唄市': 'bibai-city',
+  '芦別市': 'ashibetsu-city',
+  '赤平市': 'akabira-city',
+  '三笠市': 'mikasa-city',
+  '夕張市': 'yubari-city',
+  '伊達市': 'date-city',
+  // リゾート・後志エリア（町村）
+  'ニセコ町': 'niseko-town-abuta-county',
+  '倶知安町': 'kutchan-town-abuta-county',
+  '余市町': 'yoichi-town-yoichi-county',
+  '洞爺湖町': 'toyako-town-abuta-county',
+  '留寿都村': 'rusutsu-village-abuta-county',
+  '真狩村': 'makkari-village-abuta-county',
+  '京極町': 'kyogoku-town-abuta-county',
+  '喜茂別町': 'kimobetsu-town-abuta-county',
+  '蘭越町': 'rankoshi-town-isoya-county',
+  '共和町': 'kyowa-town-iwanai-county',
+  '岩内町': 'iwanai-town-iwanai-county',
+  '仁木町': 'niki-town-yoichi-county',
+  '積丹町': 'shakotan-town-shakotan-county',
+  '古平町': 'furubira-town-furubira-county',
+  '赤井川村': 'akaigawa-village-yoichi-county',
+  // 空知エリア
+  '南幌町': 'nanporo-town-sorachi-county',
+  '奈井江町': 'naie-town-sorachi-county',
+  '上砂川町': 'kamisunagawa-town-sorachi-county',
+  '由仁町': 'yuni-town-yubari-county',
+  '長沼町': 'naganuma-town-yubari-county',
+  '栗山町': 'kuriyama-town-yubari-county',
+  '当別町': 'tobetsu-town-ishikari-county',
+  '新篠津村': 'shinshinotsu-village-ishikari-county',
+  // 十勝エリア
+  '音更町': 'otofuke-town-kato-county',
+  '士幌町': 'shihoro-town-kato-county',
+  '上士幌町': 'kamishihoro-town-kato-county',
+  '鹿追町': 'shikaoi-town-kato-county',
+  '新得町': 'shintoku-town-kamikawa-county',
+  '清水町': 'shimizu-town-kamikawa-county',
+  '芽室町': 'memuro-town-kasai-county',
+  '中札内村': 'nakasatsunai-village-kasai-county',
+  '更別村': 'sarabetsu-village-kasai-county',
+  '大樹町': 'taiki-town-hiroo-county',
+  '広尾町': 'hiroo-town-hiroo-county',
+  '幕別町': 'makubetsu-town-nakagawa-county',
+  '池田町': 'ikeda-town-nakagawa-county',
+  '豊頃町': 'toyokoro-town-nakagawa-county',
+  '本別町': 'honbetsu-town-nakagawa-county',
+  '足寄町': 'ashoro-town-ashoro-county',
+  '陸別町': 'rikubetsu-town-ashoro-county',
+  '浦幌町': 'urahoro-town-tokachi-county',
+};
+
+// アットホームの検索URLを生成
+export function getAthomeSearchUrl(areaName: string, page: number = 1): string | null {
+  const slug = ATHOME_AREA_SLUGS[areaName];
+  if (!slug) return null;
+  
+  const baseUrl = 'https://www.athome.co.jp/kodate/chuko/hokkaido';
+  if (page === 1) {
+    return `${baseUrl}/${slug}/list/`;
+  }
+  return `${baseUrl}/${slug}/list/page${page}/`;
+}

@@ -6,6 +6,7 @@ export interface SearchParams {
   areas: string[];
   propertyTypes: string[];
   maxPages?: number;
+  customUrl?: string;  // 指定された場合、このURLを直接使用
 }
 
 export interface ListingCandidate {

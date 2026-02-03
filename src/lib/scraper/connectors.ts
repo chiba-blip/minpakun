@@ -234,9 +234,23 @@ export class AthomeConnector implements Connector {
     const candidates: ListingCandidate[] = [];
     const maxPages = params.maxPages || 200;
     
+    // customUrlが指定されている場合はそのURLを使用（1ページのみ）
+    if (params.customUrl) {
+      try {
+        console.log(`[athome] Fetching custom URL: ${params.customUrl}`);
+        const html = await fetchHtml(params.customUrl);
+        const results = this.parseSearchResults(html);
+        console.log(`[athome] Custom URL: found ${results.length} listings`);
+        return results;
+      } catch (e) {
+        console.error(`[athome] Error fetching custom URL:`, e);
+        return [];
+      }
+    }
+    
+    // デフォルト: 北海道全体を巡回
     for (let page = 1; page <= maxPages; page++) {
       try {
-        // アットホームのページネーション: /list/, /list/page2/, /list/page3/...
         const url = page === 1 
           ? `${this.baseUrl}/kodate/chuko/hokkaido/list/`
           : `${this.baseUrl}/kodate/chuko/hokkaido/list/page${page}/`;

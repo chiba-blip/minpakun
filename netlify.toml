@@ -15,19 +15,24 @@
   node_bundler = "esbuild"
   directory = "netlify/functions"
 
-# Background Function - 大量スクレイピング用（最大15分）
-[functions."scrape-background"]
+# Background Function - バッチスクレイピング用（最大15分）
+[functions."scrape-batch"]
   timeout = 900  # 15分
 
 # Scheduled Functions
-[functions."jobs-scrape"]
-  schedule = "0 */6 * * *"  # 6時間ごと（0, 6, 12, 18時）
+# 初回取得中: 毎時実行でコツコツ取得
+# 完了後: 週1回（日曜0時）に差分スクレイプ
+[functions."scheduled-scrape"]
+  schedule = "0 * * * *"  # 毎時実行（初回取得用）
 
-[functions."jobs-simulate"]
-  schedule = "30 */6 * * *"  # 6時間ごと（scrapeの30分後）
+[functions."scheduled-scrape-weekly"]
+  schedule = "0 0 * * 0"  # 毎週日曜0時（差分スクレイプ用）
 
-[functions."jobs-notify"]
-  schedule = "0 * * * *"  # 1時間ごと
+[functions."scheduled-simulate"]
+  schedule = "30 * * * *"  # 毎時30分（スクレイプ後に実行）
+
+[functions."scheduled-check-links"]
+  schedule = "0 3 * * 0"  # 毎週日曜3時（リンク切れチェック）
 
 # Next.jsのAPIルートは@netlify/plugin-nextjsが自動処理するため
 # /api/* へのリダイレクトは不要
