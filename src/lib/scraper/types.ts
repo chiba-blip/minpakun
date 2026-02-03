@@ -27,6 +27,8 @@ export interface ListingDetail {
   rooms: number | null;       // 後方互換性のため残す
   units: number | null;       // 戸数（中古戸建=1、集合住宅=戸数）
   num_rooms: number | null;   // 部屋数（中古戸建=間取りから、集合住宅=null）
+  nearest_station: string | null;  // 最寄駅
+  walk_minutes: number | null;     // 徒歩分数
   property_type: string | null;
   images?: string[];
   description?: string;
@@ -50,6 +52,8 @@ export interface NormalizedListing {
     rooms: number | null;       // 後方互換性のため残す
     units: number | null;       // 戸数
     num_rooms: number | null;   // 部屋数
+    nearest_station: string | null;  // 最寄駅
+    walk_minutes: number | null;     // 徒歩分数
     property_type: string | null;
   };
 }

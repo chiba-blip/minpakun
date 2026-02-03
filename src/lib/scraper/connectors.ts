@@ -123,10 +123,60 @@ function extractBuiltYear(html: string): number | null {
 }
 
 function detectPropertyType(html: string): string | null {
-  if (html.includes('一棟') || html.includes('アパート')) return 'アパート';
-  if (html.includes('戸建') || html.includes('一軒家') || html.includes('一戸建')) return '一戸建て';
+  // より詳細な物件タイプ検出
+  if (html.includes('一棟マンション')) return '一棟マンション';
+  if (html.includes('一棟アパート')) return '一棟アパート';
+  if (html.includes('一棟') && html.includes('アパート')) return '一棟アパート';
+  if (html.includes('一棟') && html.includes('マンション')) return '一棟マンション';
+  if (html.includes('一棟')) return '一棟集合住宅';
+  if (html.includes('戸建') || html.includes('一軒家') || html.includes('一戸建')) return '中古戸建て';
   if (html.includes('マンション')) return 'マンション';
+  if (html.includes('アパート')) return 'アパート';
   return null;
+}
+
+/**
+ * 最寄駅と徒歩分数を抽出
+ */
+function extractStationInfo(html: string): { station: string | null; walkMinutes: number | null } {
+  // 複数パターンで最寄駅と徒歩分数を抽出
+  const patterns = [
+    // 「○○駅」徒歩X分
+    /([^\s<>「」]+駅)[^<>]*?徒歩\s*(\d+)\s*分/,
+    // ○○駅 徒歩X分
+    /([^\s<>]+駅)\s*徒歩\s*(\d+)\s*分/,
+    // 交通：○○線「○○駅」徒歩X分
+    /交通[：:][^<>]*?「([^」]+駅?)」[^<>]*?徒歩\s*(\d+)\s*分/,
+    // 最寄駅：○○駅
+    /最寄駅[：:\s]*([^\s<>]+駅)/,
+    // ○○線 ○○駅
+    /[^\s<>]+線\s*([^\s<>]+駅)[^<>]*?徒歩\s*(\d+)\s*分/,
+    // 地下鉄○○線「○○」駅
+    /地下鉄[^\s<>]+線[「『]?([^」』<>]+)[」』]?駅[^<>]*?徒歩\s*(\d+)\s*分/,
+  ];
+  
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m) {
+      let station = m[1]?.trim();
+      // 駅名が「駅」で終わっていない場合は追加
+      if (station && !station.endsWith('駅')) {
+        station += '駅';
+      }
+      const walkMinutes = m[2] ? parseInt(m[2], 10) : null;
+      if (station) {
+        return { station, walkMinutes };
+      }
+    }
+  }
+  
+  // 徒歩分数のみ取得できる場合
+  const walkOnlyMatch = html.match(/徒歩\s*(\d+)\s*分/);
+  if (walkOnlyMatch) {
+    return { station: null, walkMinutes: parseInt(walkOnlyMatch[1], 10) };
+  }
+  
+  return { station: null, walkMinutes: null };
 }
 
 // =============================================================================
@@ -190,6 +240,7 @@ export class SuumoConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    const stationInfo = extractStationInfo(html);
     return {
       url,
       title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
@@ -201,6 +252,8 @@ export class SuumoConnector implements Connector {
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
       units: 1,  // 中古戸建ては常に1戸
       num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
       property_type: '中古戸建て',
       external_id: url.match(/__JJ_([^/]+)/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
@@ -218,6 +271,8 @@ export class SuumoConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };
@@ -330,6 +385,8 @@ export class AthomeConnector implements Connector {
     const buildingArea = extractBuildingAreaAthome(html) || extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/);
     const landArea = extractLandAreaAthome(html) || extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/);
     
+    const stationInfo = extractStationInfo(html);
+    
     return {
       url,
       title: title || '物件名不明',
@@ -341,6 +398,8 @@ export class AthomeConnector implements Connector {
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
       units: 1,  // 中古戸建ては常に1戸
       num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
       property_type: '中古戸建て',
       external_id: url.match(/\/kodate\/(\d{10})\//)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
@@ -358,6 +417,8 @@ export class AthomeConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };
@@ -445,6 +506,8 @@ export class HomesConnector implements Connector {
       }
     }
     
+    const stationInfo = extractStationInfo(html);
+    
     return {
       url,
       title: title || '物件名不明',
@@ -456,6 +519,8 @@ export class HomesConnector implements Connector {
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
       units: 1,  // 中古戸建ては常に1戸
       num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
       property_type: '中古戸建て',
       external_id: url.match(/b-(\d+)/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
@@ -473,6 +538,8 @@ export class HomesConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };
@@ -535,6 +602,7 @@ export class KenbiyaConnector implements Connector {
     const isKodate = propertyType.includes('戸建');
     const totalUnits = extractNumber(html, /総戸数[^<]*(\d+)/);
     const numRoomsFromLayout = extractNumber(html, /(\d+)[SLDK]+/);
+    const stationInfo = extractStationInfo(html);
     
     return {
       url,
@@ -547,6 +615,8 @@ export class KenbiyaConnector implements Connector {
       rooms: isKodate ? numRoomsFromLayout : totalUnits,  // 後方互換性
       units: isKodate ? 1 : (totalUnits || 1),  // 戸建=1、集合=総戸数
       num_rooms: isKodate ? numRoomsFromLayout : null,  // 戸建=間取り、集合=null
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
       property_type: propertyType,
       external_id: url.match(/\/property\/(\d+)\//)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
@@ -564,6 +634,8 @@ export class KenbiyaConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };
@@ -629,6 +701,7 @@ export class RakumachiConnector implements Connector {
     const isKodate = propertyType.includes('戸建');
     const totalUnits = extractNumber(html, /総戸数[^<]*(\d+)/);
     const numRoomsFromLayout = extractNumber(html, /(\d+)[SLDK]+/);
+    const stationInfo = extractStationInfo(html);
     
     return {
       url,
@@ -641,6 +714,8 @@ export class RakumachiConnector implements Connector {
       rooms: isKodate ? numRoomsFromLayout : totalUnits,  // 後方互換性
       units: isKodate ? 1 : (totalUnits || 1),  // 戸建=1、集合=総戸数
       num_rooms: isKodate ? numRoomsFromLayout : null,  // 戸建=間取り、集合=null
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
       property_type: propertyType,
       external_id: url.match(/\/(\d+)\/show\.html/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
@@ -658,6 +733,8 @@ export class RakumachiConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };
@@ -666,37 +743,64 @@ export class RakumachiConnector implements Connector {
 
 // =============================================================================
 // 札幌不動産連合隊 - https://fudosanlist.cbiz.ne.jp/
+// prop=1: 土地, prop=2: 一戸建て, prop=3: マンション, prop=4: 一棟マンション, prop=5: 一棟アパート
 // =============================================================================
 export class HokkaidoRengotaiConnector implements Connector {
   readonly key = 'hokkaido-rengotai';
   readonly name = '札幌不動産連合隊';
   private baseUrl = 'https://fudosanlist.cbiz.ne.jp';
 
+  // 物件タイプをURLパラメータにマッピング
+  private getPropParams(propertyTypes: string[]): string[] {
+    const props: string[] = [];
+    for (const pt of propertyTypes) {
+      if (pt.includes('戸建')) {
+        props.push('2');  // 一戸建て
+      }
+      if (pt.includes('一棟') || pt.includes('集合') || pt.includes('マンション') || pt.includes('アパート')) {
+        props.push('4');  // 一棟マンション
+        props.push('5');  // 一棟アパート
+      }
+    }
+    return [...new Set(props)];  // 重複排除
+  }
+
   async search(params: SearchParams): Promise<ListingCandidate[]> {
     const candidates: ListingCandidate[] = [];
     const maxPages = params.maxPages || 200;
+    const propParams = this.getPropParams(params.propertyTypes);
     
-    for (let page = 1; page <= maxPages; page++) {
-      try {
-        const sp = new URLSearchParams();
-        sp.set('prop', '1');
-        sp.set('nstg', '2');
-        sp.set('area', 'sapporo');
-        if (page > 1) sp.set('page', String(page));
-        
-        const url = `${this.baseUrl}/list/sale/?${sp.toString()}`;
-        console.log(`[rengotai] Fetching page ${page}: ${url}`);
-        const html = await fetchHtml(url);
-        const results = this.parseSearchResults(html);
-        console.log(`[rengotai] Page ${page}: found ${results.length} listings`);
-        if (results.length === 0) break;
-        candidates.push(...results);
-        await throttle(2000);
-      } catch (e) {
-        console.error(`[rengotai] Error at page ${page}:`, e);
-        break;
+    // 物件タイプが指定されていない場合はデフォルトで戸建てと一棟
+    if (propParams.length === 0) {
+      propParams.push('2', '4', '5');
+    }
+    
+    console.log(`[rengotai] Property types: ${params.propertyTypes.join(', ')} -> prop=${propParams.join(',')}`);
+    
+    // 各物件タイプごとに検索
+    for (const prop of propParams) {
+      for (let page = 1; page <= maxPages; page++) {
+        try {
+          const sp = new URLSearchParams();
+          sp.set('prop', prop);
+          sp.set('nstg', '2');  // 中古
+          if (page > 1) sp.set('page', String(page));
+          
+          const url = `${this.baseUrl}/list/sale/?${sp.toString()}`;
+          console.log(`[rengotai] Fetching prop=${prop} page ${page}: ${url}`);
+          const html = await fetchHtml(url);
+          const results = this.parseSearchResults(html);
+          console.log(`[rengotai] prop=${prop} Page ${page}: found ${results.length} listings`);
+          if (results.length === 0) break;
+          candidates.push(...results);
+          await throttle(2000);
+        } catch (e) {
+          console.error(`[rengotai] Error at prop=${prop} page ${page}:`, e);
+          break;
+        }
       }
     }
+    
     console.log(`[rengotai] Total candidates: ${candidates.length}`);
     return candidates.filter((c, i, arr) => arr.findIndex(x => x.url === c.url) === i);
   }
@@ -720,6 +824,16 @@ export class HokkaidoRengotaiConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    
+    // 物件タイプを判定
+    const propertyType = detectPropertyType(html) || '中古戸建て';
+    const isKodate = propertyType.includes('戸建');
+    const totalUnits = extractNumber(html, /総戸数[^<]*(\d+)/);
+    const numRoomsFromLayout = extractNumber(html, /(\d+)[SLDK]+/);
+    
+    // 最寄駅と徒歩分数を取得
+    const stationInfo = extractStationInfo(html);
+    
     return {
       url,
       title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
@@ -729,10 +843,12 @@ export class HokkaidoRengotaiConnector implements Connector {
       building_area: extractNumber(html, /建物面積[^<]*([\d.]+)\s*m/),
       land_area: extractNumber(html, /土地面積[^<]*([\d.]+)\s*m/),
       built_year: extractBuiltYear(html),
-      rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
-      units: 1,  // 中古戸建ては常に1戸
-      num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
-      property_type: '中古戸建て',
+      rooms: isKodate ? numRoomsFromLayout : totalUnits,
+      units: isKodate ? 1 : (totalUnits || 1),
+      num_rooms: isKodate ? numRoomsFromLayout : null,
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
+      property_type: propertyType,
       external_id: url.match(/\/(\d+)\/?$/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
     };
@@ -749,6 +865,8 @@ export class HokkaidoRengotaiConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };
@@ -813,6 +931,7 @@ export class HousedoConnector implements Connector {
   async fetchDetail(url: string): Promise<ListingDetail> {
     const html = await fetchHtml(url);
     await throttle(1500);
+    const stationInfo = extractStationInfo(html);
     return {
       url,
       title: html.match(/<h1[^>]*>([^<]+)<\/h1>/i)?.[1]?.trim() || '物件名不明',
@@ -824,6 +943,8 @@ export class HousedoConnector implements Connector {
       rooms: extractNumber(html, /(\d+)[SLDK]+/) || 1,
       units: 1,  // 中古戸建ては常に1戸
       num_rooms: extractNumber(html, /(\d+)[SLDK]+/) || null,  // 間取りから部屋数
+      nearest_station: stationInfo.station,
+      walk_minutes: stationInfo.walkMinutes,
       property_type: '中古戸建て',
       external_id: url.match(/detail\/(\d+)/)?.[1] || null,
       raw: { url, scraped_at: new Date().toISOString() },
@@ -841,6 +962,8 @@ export class HousedoConnector implements Connector {
         building_area: detail.building_area, land_area: detail.land_area,
         built_year: detail.built_year, rooms: detail.rooms,
         units: detail.units, num_rooms: detail.num_rooms,
+        nearest_station: detail.nearest_station,
+        walk_minutes: detail.walk_minutes,
         property_type: detail.property_type,
       },
     };

@@ -198,6 +198,8 @@ async function saveListing(
         rooms: listing.property.rooms,
         units: listing.property.units,
         num_rooms: listing.property.num_rooms,
+        nearest_station: listing.property.nearest_station,
+        walk_minutes: listing.property.walk_minutes,
         property_type: listing.property.property_type,
       })
       .select('id')
