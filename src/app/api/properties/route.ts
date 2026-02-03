@@ -66,6 +66,8 @@ export async function GET(request: NextRequest) {
     }
 
     // 倍率フィルタと整形
+    const showAll = searchParams.get('showAll') === 'true';
+    
     const results = listings
       ?.map(listing => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -84,9 +86,9 @@ export async function GET(request: NextRequest) {
         const annualProfit = neutralSim?.annual_profit || Math.round(annualRevenue * 0.4);
         const price = listing.price || 0;
         
-        // シミュレーションがない場合はスキップしない（とりあえず表示）
+        // シミュレーション未実行の物件は除外（showAll=trueでも除外）
         if (annualRevenue === 0) {
-          return null; // シミュレーション未実行の物件は除外
+          return null;
         }
         
         // 倍率判定（利益ベース）
@@ -123,7 +125,7 @@ export async function GET(request: NextRequest) {
           simulations,
         };
       })
-      .filter(item => item && item.meets_condition);
+      .filter(item => item && (showAll || item.meets_condition));
 
     return NextResponse.json({
       items: results,

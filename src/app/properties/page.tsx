@@ -169,12 +169,16 @@ export default function PropertiesPage() {
     scrapeConfig.property_types.includes(type.value)
   );
 
-  async function fetchProperties() {
+  async function fetchProperties(showAllOverride?: boolean) {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         multiple: String(condition.multiple),
       });
+      // showAll=trueで倍率フィルタを無視（条件外も表示）
+      if (showAllOverride !== false) {
+        params.set('showAll', 'true');
+      }
       if (condition.areas.length > 0) {
         params.set('areas', condition.areas.join(','));
       }
