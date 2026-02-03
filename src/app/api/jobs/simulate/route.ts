@@ -61,6 +61,12 @@ export async function POST(request: NextRequest) {
   const results = {
     processed: 0,
     simulated: 0,
+    skipped: {
+      already_simulated: 0,
+      no_api_key: 0,
+      no_address: 0,
+      airroi_failed: 0,
+    },
     errors: [] as string[],
     message: '',
     has_more: false,
@@ -124,6 +130,7 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (existingSim && existingSim.length > 0) {
+        results.skipped.already_simulated++;
         continue;
       }
 
@@ -140,13 +147,13 @@ export async function POST(request: NextRequest) {
         // AirROI APIのみ使用（ヒューリスティクスへのフォールバックなし）
         if (!hasAirROIKey) {
           console.log(`[simulate] Skipping property ${property.id}: AirROI API key not configured`);
-          results.errors.push(`Skipped: AirROI API key not configured`);
+          results.skipped.no_api_key++;
           continue;
         }
         
         if (!property.address_raw) {
           console.log(`[simulate] Skipping property ${property.id}: No address available`);
-          results.errors.push(`Skipped ${property.id}: No address`);
+          results.skipped.no_address++;
           continue;
         }
 
@@ -156,7 +163,8 @@ export async function POST(request: NextRequest) {
         } catch (airroiError) {
           const errorMessage = airroiError instanceof Error ? airroiError.message : String(airroiError);
           console.error(`[simulate] AirROI failed for property ${property.id}: ${errorMessage}`);
-          results.errors.push(`AirROI failed for ${property.id}: ${errorMessage}`);
+          results.skipped.airroi_failed++;
+          results.errors.push(`AirROI failed: ${errorMessage.substring(0, 100)}`);
           continue; // スキップ（ヒューリスティクスは使わない）
         }
 
@@ -200,8 +208,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    results.has_more = listings.length === pageSize && results.processed === pageSize;
-    results.message = `${results.simulated}件のシミュレーションを完了しました（offset=${offset}, processed=${results.processed}, pageSize=${pageSize}）`;
+    // まだ処理すべきリスティングがあるかどうか
+    // - リスティングがpageSize分あった場合は次のページがある可能性
+    // - タイムアウトで途中で抜けた場合も続きがある
+    const timedOut = Date.now() - startedAt > timeBudgetMs;
+    results.has_more = listings.length === pageSize || (timedOut && results.processed < listings.length);
+    results.message = `${results.simulated}件のシミュレーションを完了しました（offset=${offset}, processed=${results.processed}, pageSize=${pageSize}, timedOut=${timedOut}）`;
     return NextResponse.json(results);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
