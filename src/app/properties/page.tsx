@@ -196,7 +196,7 @@ export default function PropertiesPage() {
   );
 
   // 物件取得（初回読み込み用：シミュレーション未実行も含む）
-  async function fetchProperties(page: number = 1) {
+  async function fetchProperties(page: number = 1, sort?: { key: string; order: string }) {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -210,6 +210,13 @@ export default function PropertiesPage() {
       }
       if (condition.propertyTypes.length > 0) {
         params.set('types', condition.propertyTypes.join(','));
+      }
+      // ソートパラメータ
+      const sk = sort?.key || sortKey;
+      const so = sort?.order || sortOrder;
+      if (sk) {
+        params.set('sortKey', sk);
+        params.set('sortOrder', so);
       }
 
       const res = await fetch(`/api/properties?${params.toString()}`);
@@ -232,7 +239,7 @@ export default function PropertiesPage() {
   }
   
   // フィルター付き物件取得
-  async function fetchPropertiesFiltered(page: number = 1) {
+  async function fetchPropertiesFiltered(page: number = 1, sort?: { key: string; order: string }) {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -253,6 +260,13 @@ export default function PropertiesPage() {
       if (condition.builtYearMin) params.set('built_year_min', condition.builtYearMin);
       if (condition.buildingAreaMin) params.set('area_min', condition.buildingAreaMin);
       if (condition.buildingAreaMax) params.set('area_max', condition.buildingAreaMax);
+      // ソートパラメータ
+      const sk = sort?.key || sortKey;
+      const so = sort?.order || sortOrder;
+      if (sk) {
+        params.set('sortKey', sk);
+        params.set('sortOrder', so);
+      }
 
       const res = await fetch(`/api/properties?${params.toString()}`);
       const result = await res.json();
@@ -290,52 +304,34 @@ export default function PropertiesPage() {
 
   // ソート切り替え
   function handleSort(key: SortKey) {
+    let newKey: SortKey = key;
+    let newOrder: SortOrder = 'asc';
+
     if (sortKey === key) {
       // 同じキーの場合: asc → desc → null の順で切り替え
       if (sortOrder === 'asc') {
-        setSortOrder('desc');
+        newOrder = 'desc';
       } else {
-        setSortKey(null);
-        setSortOrder('asc');
+        newKey = null;
+        newOrder = 'asc';
       }
+    }
+
+    setSortKey(newKey);
+    setSortOrder(newOrder);
+
+    // APIに再リクエスト
+    setCurrentPage(1);
+    if (hasSearched) {
+      fetchPropertiesFiltered(1, { key: newKey || 'scraped_at', order: newOrder });
     } else {
-      setSortKey(key);
-      setSortOrder('asc');
+      fetchProperties(1, { key: newKey || 'scraped_at', order: newOrder });
     }
   }
 
-  // ソート済みデータを取得
+  // ソート済みデータを取得（サーバー側でソート済みなのでそのまま返す）
   function getSortedItems(): PropertyItem[] {
-    if (!data?.items) return [];
-    if (!sortKey) return data.items;
-
-    return [...data.items].sort((a, b) => {
-      let valueA: number;
-      let valueB: number;
-
-      switch (sortKey) {
-        case 'price':
-          valueA = a.price;
-          valueB = b.price;
-          break;
-        case 'annual_profit':
-          valueA = a.annual_profit;
-          valueB = b.annual_profit;
-          break;
-        case 'actual_multiple':
-          valueA = a.actual_multiple;
-          valueB = b.actual_multiple;
-          break;
-        default:
-          return 0;
-      }
-
-      if (sortOrder === 'asc') {
-        return valueA - valueB;
-      } else {
-        return valueB - valueA;
-      }
-    });
+    return data?.items || [];
   }
 
   // ソートアイコンを取得

@@ -10,11 +10,14 @@ export async function GET(request: NextRequest) {
   const propertyTypes = searchParams.get('types')?.split(',').filter(Boolean) || [];
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '50');
-  const offset = (page - 1) * limit;
+  const sortKey = searchParams.get('sortKey') || 'scraped_at';
+  const sortOrder = searchParams.get('sortOrder') || 'desc';
+  const showAll = searchParams.get('showAll') === 'true';
+  const includeNoSimulation = searchParams.get('includeNoSim') === 'true';
 
   try {
-    // リスティングとシミュレーションを結合して取得
-    // simulations は listing_id で紐付け（Supabaseは自動的にFKを認識）
+    // 全件取得してフィルタリング・ソート後にページング
+    // （シミュレーション結果に基づくフィルタリングはDBクエリでは困難なため）
     let query = supabase
       .from('listings')
       .select(`
@@ -45,9 +48,8 @@ export async function GET(request: NextRequest) {
           annual_revenue,
           annual_profit
         )
-      `, { count: 'exact' })
-      .order('scraped_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      `)
+      .order('scraped_at', { ascending: false });
 
     // エリアフィルタ
     if (areas.length > 0) {
@@ -59,17 +61,14 @@ export async function GET(request: NextRequest) {
       query = query.in('properties.property_type', propertyTypes);
     }
 
-    const { data: listings, error, count } = await query;
+    const { data: listings, error } = await query;
 
     if (error) {
       throw error;
     }
 
-    // 倍率フィルタと整形
-    const showAll = searchParams.get('showAll') === 'true';
-    const includeNoSimulation = searchParams.get('includeNoSim') === 'true';
-    
-    const results = listings
+    // 整形とフィルタリング
+    const allResults = listings
       ?.map(listing => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const property = listing.properties as any;
@@ -83,11 +82,9 @@ export async function GET(request: NextRequest) {
 
         const neutralSim = simulations?.find(s => s.scenario === 'NEUTRAL');
         const annualRevenue = neutralSim?.annual_revenue || 0;
-        // 利益がない場合は売上の40%を仮の利益として使用（コスト60%想定）
         const annualProfit = neutralSim?.annual_profit || Math.round(annualRevenue * 0.4);
         const price = listing.price || 0;
         
-        // シミュレーション未実行の物件
         const hasSimulation = annualRevenue > 0;
         
         // シミュレーション未実行の物件は除外（includeNoSim=trueなら表示）
@@ -118,9 +115,9 @@ export async function GET(request: NextRequest) {
           built_year: property?.built_year || null,
           rooms: property?.rooms || null,
           property_type: property?.property_type || null,
-          annual_revenue: annualRevenue,  // 売上
+          annual_revenue: annualRevenue,
           annual_revenue_man: Math.round(annualRevenue / 10000),
-          annual_profit: annualProfit,    // 利益（売上-コスト）
+          annual_profit: annualProfit,
           annual_profit_man: Math.round(annualProfit / 10000),
           actual_multiple: actualMultiple,
           renovation_budget: renovationBudget,
@@ -130,12 +127,55 @@ export async function GET(request: NextRequest) {
           simulations,
         };
       })
-      .filter(item => item && (showAll || includeNoSimulation || item.meets_condition));
+      .filter(item => item && (showAll || includeNoSimulation || item.meets_condition)) as NonNullable<typeof allResults>[number][];
+
+    // ソート
+    const sortedResults = [...(allResults || [])].sort((a, b) => {
+      let aVal: number | string | null = null;
+      let bVal: number | string | null = null;
+
+      switch (sortKey) {
+        case 'price':
+          aVal = a.price;
+          bVal = b.price;
+          break;
+        case 'annual_profit':
+          aVal = a.annual_profit;
+          bVal = b.annual_profit;
+          break;
+        case 'actual_multiple':
+          // Infinityは最後に
+          aVal = isFinite(a.actual_multiple) ? a.actual_multiple : 9999999;
+          bVal = isFinite(b.actual_multiple) ? b.actual_multiple : 9999999;
+          break;
+        case 'scraped_at':
+        default:
+          aVal = a.scraped_at || '';
+          bVal = b.scraped_at || '';
+          break;
+      }
+
+      if (aVal === null || aVal === undefined) aVal = sortOrder === 'asc' ? Infinity : -Infinity;
+      if (bVal === null || bVal === undefined) bVal = sortOrder === 'asc' ? Infinity : -Infinity;
+
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+
+      return sortOrder === 'asc' 
+        ? (aVal as number) - (bVal as number)
+        : (bVal as number) - (aVal as number);
+    });
+
+    // ページング
+    const totalCount = sortedResults.length;
+    const offset = (page - 1) * limit;
+    const pagedResults = sortedResults.slice(offset, offset + limit);
 
     return NextResponse.json({
-      items: results,
-      total: results?.length || 0,
-      totalCount: count || 0, // DB上の総件数
+      items: pagedResults,
+      total: pagedResults.length,
+      totalCount, // フィルタリング後の総件数
       page,
       limit,
       multiple,
