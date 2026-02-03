@@ -127,6 +127,9 @@ export async function GET(request: NextRequest) {
         // リノベ予算 = 年間利益×10 - 価格
         const renovationBudget = annualProfit * 10 - price;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const portalSite = listing.portal_sites as any;
+        
         return {
           id: listing.id,
           url: listing.url,
@@ -134,7 +137,7 @@ export async function GET(request: NextRequest) {
           price,
           priceMan: Math.round(price / 10000),
           scraped_at: listing.scraped_at,
-          portal_site: listing.portal_sites,
+          portal_site: portalSite ? { name: portalSite.name, key: portalSite.key } : null,
           property_id: property?.id || null,
           address: property?.address_raw || property?.normalized_address || '',
           city: property?.city || null,
