@@ -159,8 +159,188 @@ export default async function handler(request: Request) {
       logInfo('[scrape-background] Progress reset');
     }
 
-    // 5. 各エリアを処理
-    for (const areaName of targetAreas) {
+    // 5. サイト別処理
+    if (targetSite === 'hokkaido-rengotai') {
+      // 北海道不動産連合隊: コネクターのsearchメソッドを使用
+      await processRengotai(supabase, connector, site, targetAreas, scrapeConfig?.property_types || [], results, startTime, mode, forceReset);
+    } else {
+      // アットホーム: エリア別処理
+      await processAthome(supabase, connector, site, targetAreas, results, startTime, mode, forceReset);
+    }
+
+    // 全エリア完了チェック
+    const { data: allProgress } = await supabase
+      .from('scrape_progress')
+      .select('status')
+      .eq('site_key', targetSite);
+    
+    const completedCount = allProgress?.filter((p: {status: string}) => p.status === 'completed').length || 0;
+    const totalCount = allProgress?.length || 0;
+    results.completed = totalCount > 0 && completedCount === totalCount;
+    results.areas_completed = completedCount;
+    results.areas_total = totalCount;
+
+    results.endTime = new Date().toISOString();
+    results.elapsed_seconds = Math.round((Date.now() - startTime) / 1000);
+
+    logInfo(`[scrape-background] Finished`, results);
+
+    return new Response(JSON.stringify({
+      success: true,
+      message: results.completed 
+        ? `全エリア完了: ${results.total_inserted}件取得` 
+        : `${results.total_inserted}件取得（${results.areas_completed}/${results.areas_total}エリア完了）`,
+      ...results,
+    }), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    results.endTime = new Date().toISOString();
+    results.elapsed_seconds = Math.round((Date.now() - startTime) / 1000);
+    logError('[scrape-background] Failed', { error: String(error) });
+    
+    return new Response(JSON.stringify({
+      success: false,
+      error: String(error),
+      ...results,
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// 北海道不動産連合隊の処理
+async function processRengotai(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  connector: ReturnType<typeof getConnector>,
+  site: { id: string },
+  targetAreas: string[],
+  propertyTypes: string[],
+  results: typeof globalThis.results,
+  startTime: number,
+  mode: string,
+  forceReset: boolean
+) {
+  if (forceReset) {
+    await supabase.from('scrape_progress').delete().eq('site_key', 'hokkaido-rengotai');
+    logInfo('[scrape-background] Progress reset');
+  }
+
+  // 進捗を取得または作成
+  let progress = await getOrCreateProgress(supabase, 'hokkaido-rengotai', 'all', '全体', mode);
+  
+  if (progress.status === 'completed' && mode === 'initial') {
+    results.areas_completed = 1;
+    results.areas_total = 1;
+    logInfo('[scrape-background] Already completed');
+    return;
+  }
+
+  await updateProgress(supabase, progress.id, { status: 'in_progress' });
+
+  // コネクターのsearchメソッドで候補を取得
+  const types = propertyTypes.length > 0 ? propertyTypes : ['一戸建て'];
+  logInfo(`[scrape-background] Searching with types: ${types.join(', ')}`);
+
+  try {
+    const candidates = await connector!.search({
+      areas: targetAreas,
+      propertyTypes: types,
+      maxPages: 50, // 最大50ページ
+    });
+
+    logInfo(`[scrape-background] Found ${candidates.length} candidates`);
+    results.areas_total = 1;
+
+    let consecutiveSkips = 0;
+
+    for (const candidate of candidates) {
+      if (Date.now() - startTime > MAX_TIME_MS) {
+        logInfo('[scrape-background] Time limit reached');
+        break;
+      }
+
+      results.total_processed++;
+
+      // 既存チェック
+      const { data: existing } = await supabase
+        .from('listings')
+        .select('id')
+        .eq('url', candidate.url)
+        .maybeSingle();
+
+      if (existing) {
+        results.total_skipped++;
+        consecutiveSkips++;
+        if (mode === 'incremental' && consecutiveSkips >= CONSECUTIVE_SKIP_THRESHOLD) {
+          logInfo('[scrape-background] Consecutive skips threshold reached');
+          break;
+        }
+        continue;
+      }
+
+      consecutiveSkips = 0;
+
+      try {
+        const detail = await connector!.fetchDetail(candidate.url);
+        const normalized = connector!.normalize(detail);
+        
+        // エリアフィルター
+        if (targetAreas.length > 0 && normalized.property.city) {
+          const matchesArea = targetAreas.some(area => 
+            normalized.property.city?.includes(area) || 
+            normalized.property.address_raw?.includes(area)
+          );
+          if (!matchesArea) {
+            logInfo(`[scrape-background] Skipping (area mismatch): ${normalized.property.city}`);
+            continue;
+          }
+        }
+
+        logInfo(`[scrape-background] Saving: ${normalized.title}, city: ${normalized.property.city}`);
+        await saveListing(supabase, site.id, normalized);
+        results.total_inserted++;
+        await throttle(DETAIL_THROTTLE_MS);
+      } catch (detailError) {
+        results.errors.push(`${candidate.url}: ${detailError}`);
+        logError('[scrape-background] Detail error', { url: candidate.url, error: String(detailError) });
+      }
+    }
+
+    // 完了
+    await updateProgress(supabase, progress.id, {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      inserted_count: results.total_inserted,
+      skipped_count: results.total_skipped,
+    });
+    results.areas_completed = 1;
+
+  } catch (searchError) {
+    logError('[scrape-background] Search error', { error: String(searchError) });
+    results.errors.push(`Search error: ${searchError}`);
+  }
+}
+
+// アットホームの処理
+async function processAthome(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  connector: ReturnType<typeof getConnector>,
+  site: { id: string },
+  targetAreas: string[],
+  results: typeof globalThis.results,
+  startTime: number,
+  mode: string,
+  forceReset: boolean
+) {
+  if (forceReset) {
+    await supabase.from('scrape_progress').delete().eq('site_key', 'athome');
+    logInfo('[scrape-background] Progress reset');
+  }
+
+  for (const areaName of targetAreas) {
       // 時間チェック
       if (Date.now() - startTime > MAX_TIME_MS) {
         logInfo(`[scrape-background] Time limit reached: ${Math.round((Date.now() - startTime) / 1000)}s`);
@@ -174,7 +354,7 @@ export default async function handler(request: Request) {
       }
 
       // 進捗を取得または作成
-      let progress = await getOrCreateProgress(supabase, targetSite, areaSlug, areaName, mode);
+      let progress = await getOrCreateProgress(supabase, 'athome', areaSlug, areaName, mode);
       
       if (progress.status === 'completed' && mode === 'initial') {
         results.areas_completed++;
@@ -334,48 +514,6 @@ export default async function handler(request: Request) {
       }
 
       logInfo(`[scrape-background] ${areaName}: inserted=${areaInserted}, skipped=${areaSkipped}`);
-    }
-
-    // 全エリア完了チェック
-    const { data: allProgress } = await supabase
-      .from('scrape_progress')
-      .select('status')
-      .eq('site_key', targetSite);
-    
-    const completedCount = allProgress?.filter(p => p.status === 'completed').length || 0;
-    const totalCount = allProgress?.length || 0;
-    results.completed = totalCount > 0 && completedCount === totalCount;
-    results.areas_completed = completedCount;
-    results.areas_total = totalCount;
-
-    results.endTime = new Date().toISOString();
-    results.elapsed_seconds = Math.round((Date.now() - startTime) / 1000);
-
-    logInfo(`[scrape-background] Finished`, results);
-
-    return new Response(JSON.stringify({
-      success: true,
-      message: results.completed 
-        ? `全エリア完了: ${results.total_inserted}件取得` 
-        : `${results.total_inserted}件取得（${results.areas_completed}/${results.areas_total}エリア完了）`,
-      ...results,
-    }), {
-      status: 202,  // Background Functionは202を返す
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (error) {
-    results.endTime = new Date().toISOString();
-    results.elapsed_seconds = Math.round((Date.now() - startTime) / 1000);
-    logError('[scrape-background] Failed', { error: String(error) });
-    
-    return new Response(JSON.stringify({
-      success: false,
-      error: String(error),
-      ...results,
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
   }
 }
 
