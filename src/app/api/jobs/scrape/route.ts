@@ -98,12 +98,18 @@ export async function POST(request: NextRequest) {
         const normalized = connector.normalize(detail);
         
         // エリアフィルタリング: 対象エリアが設定されている場合、住所をチェック
-        if (targetAreas.length > 0 && normalized.property.address_raw) {
+        if (targetAreas.length > 0) {
           const address = normalized.property.address_raw;
+          // 住所が取得できない場合も除外（エリア判定できないため）
+          if (!address) {
+            areaFiltered++;
+            console.log(`[scrape] Skip (no address): ${candidate.url}`);
+            continue;
+          }
           const matchesArea = targetAreas.some(area => address.includes(area));
           if (!matchesArea) {
             areaFiltered++;
-            console.log(`[scrape] Skip (area): ${address}`);
+            console.log(`[scrape] Skip (area mismatch): ${address}`);
             continue;
           }
         }
