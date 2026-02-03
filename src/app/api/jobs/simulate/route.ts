@@ -42,8 +42,9 @@ const DEFAULT_COST_CONFIG = {
 };
 
 // 大量処理前提: ページングしつつ1回の実行は時間内で打ち切る
+// Netlify Proは26秒タイムアウトなので24秒に設定
 const DEFAULT_PAGE_SIZE = 200;
-const DEFAULT_TIME_BUDGET_MS = 8000;
+const DEFAULT_TIME_BUDGET_MS = 24000;
 const MAX_COMPARABLES_FOR_METRICS = 10;
 
 // AirROI APIが使用可能かチェック
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
   const pageSize = Math.min(500, Math.max(1, parseInt(searchParams.get('pageSize') || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE));
-  const timeBudgetMs = Math.min(20000, Math.max(1000, parseInt(searchParams.get('timeBudgetMs') || String(DEFAULT_TIME_BUDGET_MS), 10) || DEFAULT_TIME_BUDGET_MS));
+  const timeBudgetMs = Math.min(25000, Math.max(1000, parseInt(searchParams.get('timeBudgetMs') || String(DEFAULT_TIME_BUDGET_MS), 10) || DEFAULT_TIME_BUDGET_MS));
   const startedAt = Date.now();
 
   const results = {

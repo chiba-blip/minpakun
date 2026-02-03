@@ -69,6 +69,9 @@ interface PropertyItem {
 interface PropertyResponse {
   items: PropertyItem[];
   total: number;
+  totalCount: number;
+  page: number;
+  limit: number;
   multiple: number;
 }
 
@@ -135,6 +138,11 @@ export default function PropertiesPage() {
   // 検索実行済みフラグ
   const [hasSearched, setHasSearched] = useState(false);
 
+  // ページネーション
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const itemsPerPage = 50;
+
   // コスト設定
   const [costSettings, setCostSettings] = useState<CostSettings>({
     cleaningFee: 10000,
@@ -188,12 +196,14 @@ export default function PropertiesPage() {
   );
 
   // 物件取得（初回読み込み用：シミュレーション未実行も含む）
-  async function fetchProperties() {
+  async function fetchProperties(page: number = 1) {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         multiple: String(condition.multiple),
         includeNoSim: 'true', // 初回は全て表示
+        page: String(page),
+        limit: String(itemsPerPage),
       });
       if (condition.areas.length > 0) {
         params.set('areas', condition.areas.join(','));
@@ -205,6 +215,8 @@ export default function PropertiesPage() {
       const res = await fetch(`/api/properties?${params.toString()}`);
       const result = await res.json();
       setData(result);
+      setTotalCount(result.totalCount || 0);
+      setCurrentPage(page);
     } catch (error) {
       console.error('Failed to fetch properties:', error);
     } finally {
@@ -215,15 +227,18 @@ export default function PropertiesPage() {
   // 検索実行（シミュレーション済みのみ表示）
   function handleSearch() {
     setHasSearched(true);
-    fetchPropertiesFiltered();
+    setCurrentPage(1);
+    fetchPropertiesFiltered(1);
   }
   
   // フィルター付き物件取得
-  async function fetchPropertiesFiltered() {
+  async function fetchPropertiesFiltered(page: number = 1) {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         multiple: String(condition.multiple),
+        page: String(page),
+        limit: String(itemsPerPage),
         // 検索時はシミュレーション済みのみ（includeNoSimを送らない）
       });
       if (condition.areas.length > 0) {
@@ -242,10 +257,21 @@ export default function PropertiesPage() {
       const res = await fetch(`/api/properties?${params.toString()}`);
       const result = await res.json();
       setData(result);
+      setTotalCount(result.totalCount || 0);
+      setCurrentPage(page);
     } catch (error) {
       console.error('Failed to fetch properties:', error);
     } finally {
       setLoading(false);
+    }
+  }
+  
+  // ページ変更
+  function handlePageChange(page: number) {
+    if (hasSearched) {
+      fetchPropertiesFiltered(page);
+    } else {
+      fetchProperties(page);
     }
   }
 
@@ -790,6 +816,60 @@ export default function PropertiesPage() {
                 ))}
               </TableBody>
             </Table>
+            
+            {/* ページネーション */}
+            {totalCount > itemsPerPage && (
+              <div className="flex items-center justify-between mt-6 pt-4 border-t">
+                <div className="text-sm text-gray-500">
+                  全{totalCount}件中 {(currentPage - 1) * itemsPerPage + 1}-{Math.min(currentPage * itemsPerPage, totalCount)}件を表示
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage <= 1 || loading}
+                  >
+                    前へ
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, Math.ceil(totalCount / itemsPerPage)) }, (_, i) => {
+                      const totalPages = Math.ceil(totalCount / itemsPerPage);
+                      let pageNum: number;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={currentPage === pageNum ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => handlePageChange(pageNum)}
+                          disabled={loading}
+                          className="w-10"
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage >= Math.ceil(totalCount / itemsPerPage) || loading}
+                  >
+                    次へ
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (

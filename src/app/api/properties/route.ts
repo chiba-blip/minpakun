@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   const areas = searchParams.get('areas')?.split(',').filter(Boolean) || [];
   const propertyTypes = searchParams.get('types')?.split(',').filter(Boolean) || [];
   const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '20');
+  const limit = parseInt(searchParams.get('limit') || '50');
   const offset = (page - 1) * limit;
 
   try {
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
           annual_revenue,
           annual_profit
         )
-      `)
+      `, { count: 'exact' })
       .order('scraped_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -135,6 +135,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       items: results,
       total: results?.length || 0,
+      totalCount: count || 0, // DB上の総件数
       page,
       limit,
       multiple,
