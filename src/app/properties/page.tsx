@@ -129,8 +129,11 @@ export default function PropertiesPage() {
     builtYearMin: '',
     buildingAreaMin: '',
     buildingAreaMax: '',
-    includeNoSimulation: true, // デフォルトでシミュレーション未実行も表示
+    includeNoSimulation: true, // 初回読み込み時はシミュレーション未実行も表示
   });
+  
+  // 検索実行済みフラグ
+  const [hasSearched, setHasSearched] = useState(false);
 
   // コスト設定
   const [costSettings, setCostSettings] = useState<CostSettings>({
@@ -184,21 +187,45 @@ export default function PropertiesPage() {
     scrapeConfig.property_types.includes(type.value)
   );
 
-  async function fetchProperties(showAllOverride?: boolean) {
+  // 物件取得（初回読み込み用：シミュレーション未実行も含む）
+  async function fetchProperties() {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         multiple: String(condition.multiple),
+        includeNoSim: 'true', // 初回は全て表示
       });
-      // showAll=trueで倍率フィルタを無視（条件外も表示）
-      // デフォルトではフィルタを適用する
-      if (showAllOverride === true) {
-        params.set('showAll', 'true');
+      if (condition.areas.length > 0) {
+        params.set('areas', condition.areas.join(','));
       }
-      // シミュレーション未実行の物件も含める
-      if (condition.includeNoSimulation) {
-        params.set('includeNoSim', 'true');
+      if (condition.propertyTypes.length > 0) {
+        params.set('types', condition.propertyTypes.join(','));
       }
+
+      const res = await fetch(`/api/properties?${params.toString()}`);
+      const result = await res.json();
+      setData(result);
+    } catch (error) {
+      console.error('Failed to fetch properties:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 検索実行（シミュレーション済みのみ表示）
+  function handleSearch() {
+    setHasSearched(true);
+    fetchPropertiesFiltered();
+  }
+  
+  // フィルター付き物件取得
+  async function fetchPropertiesFiltered() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        multiple: String(condition.multiple),
+        // 検索時はシミュレーション済みのみ（includeNoSimを送らない）
+      });
       if (condition.areas.length > 0) {
         params.set('areas', condition.areas.join(','));
       }
@@ -220,10 +247,6 @@ export default function PropertiesPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleSearch() {
-    fetchProperties();
   }
 
   function downloadCsv() {
