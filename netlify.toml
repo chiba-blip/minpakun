@@ -32,8 +32,9 @@
 [functions."scheduled-scrape-weekly"]
   schedule = "0 0 * * 0"  # 毎週日曜0時（差分スクレイプ用）
 
-[functions."scheduled-simulate"]
-  schedule = "30 * * * *"  # 毎時30分（スクレイプ後に実行）
+# シミュレーションは手動実行のみ（AirROI APIコスト管理のため）
+# [functions."scheduled-simulate"]
+#   schedule = "30 * * * *"
 
 [functions."scheduled-check-links"]
   schedule = "0 3 * * 0"  # 毎週日曜3時（リンク切れチェック）
