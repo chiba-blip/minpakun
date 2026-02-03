@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          simResults = await runAirROISimulation(property, costs);
+          simResults = await runAirROISimulation(property, costs, supabase);
           console.log(`[simulate] AirROI successfully used for property ${property.id}`);
         } catch (airroiError) {
           const errorMessage = airroiError instanceof Error ? airroiError.message : String(airroiError);
@@ -396,6 +396,7 @@ async function runHeuristicsSimulation(
 
 /**
  * AirROI APIを使用したシミュレーション
+ * @param supabaseClient キャッシュ用Supabaseクライアント（オプション）
  */
 async function runAirROISimulation(
   property: {
@@ -406,7 +407,9 @@ async function runAirROISimulation(
     property_type: string | null;
     city: string | null;
   },
-  costs: CostConfig
+  costs: CostConfig,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseClient?: any
 ): Promise<SimulationResult[]> {
   if (!property.address_raw) {
     throw new Error('住所がありません');
@@ -440,8 +443,11 @@ async function runAirROISimulation(
   const propertyMultiplier = propertyAdj.multiplier;
   const propertyAdjustmentReasons = propertyAdj.reasons;
 
-  // 3. AirROI /listings/comparables で類似物件を取得
-  const airroiClient = new AirROIClient();
+  // 3. AirROI /listings/comparables で類似物件を取得（キャッシュ対応）
+  const airroiClient = new AirROIClient({ 
+    apiKey: process.env.AIRROI_API_KEY || '',
+    supabase: supabaseClient,
+  });
   console.log(`[simulate] Calling AirROI with lat=${lat}, lng=${lng}, bedrooms=${bedrooms}, baths=${baths}, guests=${guests}`);
   
   const comparablesResponse = await airroiClient.getComparables({

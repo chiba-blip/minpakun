@@ -3,12 +3,20 @@
  * 
  * 民泊類似物件の売上推計を取得
  * https://www.airroi.com/api/documentation
+ * 
+ * キャッシュ機能:
+ * - 同じlisting_idのメトリクスを重複して取得しないよう、DBにキャッシュ
+ * - キャッシュ有効期間: 30日
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 const AIRROI_BASE_URL = 'https://api.airroi.com';
+const CACHE_TTL_DAYS = 30; // キャッシュ有効期間
 
 interface AirROIConfig {
   apiKey: string;
+  supabase?: SupabaseClient; // キャッシュ用
 }
 
 // 類似物件レスポンスの型
@@ -47,9 +55,11 @@ interface MetricsResponse {
 
 export class AirROIClient {
   private apiKey: string;
+  private supabase?: SupabaseClient;
 
   constructor(config?: AirROIConfig) {
     this.apiKey = config?.apiKey || process.env.AIRROI_API_KEY || '';
+    this.supabase = config?.supabase;
     if (!this.apiKey) {
       throw new Error('AIRROI_API_KEY is not configured');
     }
@@ -91,14 +101,26 @@ export class AirROIClient {
   }
 
   /**
-   * 物件の月次メトリクスを取得
+   * 物件の月次メトリクスを取得（キャッシュ対応）
    * ドキュメント: GET /listings/metrics/all
    */
   async getListingMetrics(listingId: number, numMonths: number = 12): Promise<MetricsResponse> {
+    // キャッシュをチェック
+    if (this.supabase) {
+      const cached = await this.getMetricsFromCache(listingId);
+      if (cached) {
+        console.log(`[AirROI] Cache hit for listing ${listingId}`);
+        return cached;
+      }
+    }
+
+    // APIから取得
     const url = new URL(`${AIRROI_BASE_URL}/listings/metrics/all`);
     url.searchParams.set('id', listingId.toString());
     url.searchParams.set('num_months', numMonths.toString());
     url.searchParams.set('currency', 'native');
+
+    console.log(`[AirROI] Fetching metrics from API for listing ${listingId}`);
 
     const res = await fetch(url.toString(), {
       headers: {
@@ -111,11 +133,77 @@ export class AirROIClient {
       throw new Error(`AirROI metrics error: ${res.status} - ${error}`);
     }
 
-    return res.json();
+    const data: MetricsResponse = await res.json();
+
+    // キャッシュに保存
+    if (this.supabase) {
+      await this.saveMetricsToCache(listingId, data);
+    }
+
+    return data;
   }
 
   /**
-   * 複数物件の月次メトリクスを取得（順次処理）
+   * キャッシュからメトリクスを取得
+   */
+  private async getMetricsFromCache(listingId: number): Promise<MetricsResponse | null> {
+    if (!this.supabase) return null;
+
+    const cacheExpiry = new Date();
+    cacheExpiry.setDate(cacheExpiry.getDate() - CACHE_TTL_DAYS);
+
+    const { data, error } = await this.supabase
+      .from('airroi_metrics_cache')
+      .select('month_date, revenue, occupancy, average_daily_rate')
+      .eq('listing_id', listingId)
+      .gte('cached_at', cacheExpiry.toISOString())
+      .order('month_date', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    // キャッシュデータをMetricsResponse形式に変換
+    return {
+      results: data.map(row => ({
+        date: row.month_date,
+        revenue: row.revenue || 0,
+        occupancy: row.occupancy || 0,
+        average_daily_rate: row.average_daily_rate || 0,
+      })),
+    };
+  }
+
+  /**
+   * メトリクスをキャッシュに保存
+   */
+  private async saveMetricsToCache(listingId: number, data: MetricsResponse): Promise<void> {
+    if (!this.supabase || !data.results) return;
+
+    const now = new Date().toISOString();
+    const rows = data.results.map(metric => ({
+      listing_id: listingId,
+      month_date: metric.date,
+      revenue: metric.revenue,
+      occupancy: metric.occupancy,
+      average_daily_rate: metric.average_daily_rate,
+      cached_at: now,
+    }));
+
+    // upsert（既存データがあれば更新）
+    const { error } = await this.supabase
+      .from('airroi_metrics_cache')
+      .upsert(rows, { onConflict: 'listing_id,month_date' });
+
+    if (error) {
+      console.warn(`[AirROI] Failed to cache metrics for listing ${listingId}:`, error);
+    } else {
+      console.log(`[AirROI] Cached ${rows.length} metrics for listing ${listingId}`);
+    }
+  }
+
+  /**
+   * 複数物件の月次メトリクスを取得（順次処理、キャッシュ対応）
    */
   async getMetricsBulk(listingIds: number[], numMonths: number = 12): Promise<MetricsResponse[]> {
     const results: MetricsResponse[] = [];
@@ -127,8 +215,8 @@ export class AirROIClient {
       try {
         const metrics = await this.getListingMetrics(id, numMonths);
         results.push(metrics);
-        // APIレート制限を考慮
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // APIレート制限を考慮（キャッシュヒットの場合は短縮）
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
         console.warn(`[AirROI] Failed to get metrics for listing ${id}:`, error);
       }
