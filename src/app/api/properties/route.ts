@@ -46,7 +46,6 @@ export async function GET(request: NextRequest) {
           annual_profit
         )
       `)
-      .not('property_id', 'is', null)
       .order('scraped_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -68,16 +67,12 @@ export async function GET(request: NextRequest) {
 
     // 倍率フィルタと整形
     const showAll = searchParams.get('showAll') === 'true';
+    const includeNoSimulation = searchParams.get('includeNoSim') === 'true';
     
     const results = listings
       ?.map(listing => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const property = listing.properties as any;
-        
-        // propertyがない場合はスキップ
-        if (!property) {
-          return null;
-        }
 
         const simulations = listing.simulations as {
           id: string;
@@ -92,14 +87,17 @@ export async function GET(request: NextRequest) {
         const annualProfit = neutralSim?.annual_profit || Math.round(annualRevenue * 0.4);
         const price = listing.price || 0;
         
-        // シミュレーション未実行の物件は除外（showAll=trueでも除外）
-        if (annualRevenue === 0) {
+        // シミュレーション未実行の物件
+        const hasSimulation = annualRevenue > 0;
+        
+        // シミュレーション未実行の物件は除外（includeNoSim=trueなら表示）
+        if (!hasSimulation && !includeNoSimulation) {
           return null;
         }
         
         // 倍率判定（利益ベース）
         const actualMultiple = annualProfit > 0 ? price / annualProfit : Infinity;
-        const meetsCondition = actualMultiple <= multiple;
+        const meetsCondition = hasSimulation ? actualMultiple <= multiple : false;
 
         // リノベ予算 = 年間利益×10 - 価格
         const renovationBudget = annualProfit * 10 - price;
@@ -112,14 +110,14 @@ export async function GET(request: NextRequest) {
           priceMan: Math.round(price / 10000),
           scraped_at: listing.scraped_at,
           portal_site: listing.portal_sites,
-          property_id: property.id,
-          address: property.address_raw || property.normalized_address || '',
-          city: property.city,
-          building_area: property.building_area,
-          land_area: property.land_area,
-          built_year: property.built_year,
-          rooms: property.rooms,
-          property_type: property.property_type,
+          property_id: property?.id || null,
+          address: property?.address_raw || property?.normalized_address || '',
+          city: property?.city || null,
+          building_area: property?.building_area || null,
+          land_area: property?.land_area || null,
+          built_year: property?.built_year || null,
+          rooms: property?.rooms || null,
+          property_type: property?.property_type || null,
           annual_revenue: annualRevenue,  // 売上
           annual_revenue_man: Math.round(annualRevenue / 10000),
           annual_profit: annualProfit,    // 利益（売上-コスト）
@@ -128,10 +126,11 @@ export async function GET(request: NextRequest) {
           renovation_budget: renovationBudget,
           renovation_budget_man: Math.round(renovationBudget / 10000),
           meets_condition: meetsCondition,
+          has_simulation: hasSimulation,
           simulations,
         };
       })
-      .filter(item => item && (showAll || item.meets_condition));
+      .filter(item => item && (showAll || includeNoSimulation || item.meets_condition));
 
     return NextResponse.json({
       items: results,

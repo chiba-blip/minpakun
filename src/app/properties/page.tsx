@@ -82,6 +82,7 @@ interface SearchCondition {
   builtYearMin: string;
   buildingAreaMin: string;
   buildingAreaMax: string;
+  includeNoSimulation: boolean;
 }
 
 interface CostSettings {
@@ -128,6 +129,7 @@ export default function PropertiesPage() {
     builtYearMin: '',
     buildingAreaMin: '',
     buildingAreaMax: '',
+    includeNoSimulation: true, // デフォルトでシミュレーション未実行も表示
   });
 
   // コスト設定
@@ -140,9 +142,12 @@ export default function PropertiesPage() {
 
   useEffect(() => {
     fetchScrapeConfig();
+    // 初回ロード時に物件を取得
+    fetchProperties();
   }, []);
 
   useEffect(() => {
+    // スクレイプ条件が変更されたら再取得（初回ロード以外）
     if (scrapeConfig.areas.length > 0 || scrapeConfig.property_types.length > 0) {
       fetchProperties();
     }
@@ -189,6 +194,10 @@ export default function PropertiesPage() {
       // デフォルトではフィルタを適用する
       if (showAllOverride === true) {
         params.set('showAll', 'true');
+      }
+      // シミュレーション未実行の物件も含める
+      if (condition.includeNoSimulation) {
+        params.set('includeNoSim', 'true');
       }
       if (condition.areas.length > 0) {
         params.set('areas', condition.areas.join(','));
