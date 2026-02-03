@@ -7,37 +7,80 @@
 import type { Config } from '@netlify/functions';
 import { getSupabaseAdmin } from './_shared/supabase.mts';
 import { getConnector } from './_shared/connectors/index.mts';
-import type { SearchParams, NormalizedListing } from './_shared/connectors/types.mts';
+import type { NormalizedListing } from './_shared/connectors/types.mts';
 import { logInfo, logError } from './_shared/log.mts';
-import { throttle } from './_shared/http.mts';
+import { throttle, fetchHtml } from './_shared/http.mts';
 
-// Netlify Function設定
+// Netlify Background Function設定（15分まで実行可能）
 export const config: Config = {
   path: '/.netlify/functions/scrape-background',
 };
 
-// バッチ処理設定（Netlify無料プラン対応: 10秒以内で完了）
-// 1回の呼び出しで少量ずつ処理し、複数回実行で全データ取得
-const MAX_PAGES = 3;      // 1回のバッチで3ページ（約90件の候補）
-const MAX_DETAILS = 10;   // 1回のバッチで10件の詳細取得
-const DETAIL_THROTTLE_MS = 500;  // 0.5秒間隔
+// 15分の制限に対して余裕を持たせる（14分）
+const MAX_TIME_MS = 14 * 60 * 1000;
+const CONSECUTIVE_SKIP_THRESHOLD = 30;
+const DETAIL_THROTTLE_MS = 500;
+const PAGE_THROTTLE_MS = 1000;
+
+// エリアスラッグ（アットホーム用）
+const ATHOME_AREA_SLUGS: Record<string, string> = {
+  '小樽市': 'otaru-city',
+  'ニセコ町': 'abuta-gun-niseko-town',
+  '札幌市': 'sapporo-city',
+  '倶知安町': 'abuta-gun-kutchan-town',
+  '余市町': 'yoichi-gun-yoichi-town',
+};
+
+interface ScrapeProgress {
+  id: string;
+  site_key: string;
+  area_key: string;
+  area_name: string;
+  current_page: number;
+  total_pages: number | null;
+  processed_count: number;
+  inserted_count: number;
+  skipped_count: number;
+  consecutive_skips: number;
+  status: string;
+  mode: string;
+  error_message: string | null;
+}
+
+function getAthomeSearchUrl(areaName: string, page: number): string | null {
+  const slug = ATHOME_AREA_SLUGS[areaName];
+  if (!slug) return null;
+  if (page === 1) {
+    return `https://www.athome.co.jp/kodate/chuko/hokkaido/${slug}/list/`;
+  }
+  return `https://www.athome.co.jp/kodate/chuko/hokkaido/${slug}/list/?page=${page}`;
+}
 
 export default async function handler(request: Request) {
   const url = new URL(request.url);
   const targetSite = url.searchParams.get('site') || 'athome';
+  const forceReset = url.searchParams.get('reset') === 'true';
+  const mode = (url.searchParams.get('mode') || 'initial') as 'initial' | 'incremental';
   
-  logInfo(`[scrape-background] Started: ${targetSite}`);
+  const startTime = Date.now();
+  logInfo(`[scrape-background] Started: ${targetSite}, mode: ${mode}, reset: ${forceReset}`);
   
   const supabase = getSupabaseAdmin();
+  
   const results = {
     site: targetSite,
-    processed: 0,
-    inserted: 0,
-    skipped: 0,
-    areaFiltered: 0,
+    mode,
+    total_processed: 0,
+    total_inserted: 0,
+    total_skipped: 0,
+    areas_completed: 0,
+    areas_total: 0,
+    current_area: '',
     errors: [] as string[],
     startTime: new Date().toISOString(),
     endTime: '',
+    completed: false,
+    elapsed_seconds: 0,
   };
 
   try {
@@ -56,13 +99,19 @@ export default async function handler(request: Request) {
     // 2. スクレイプ条件を取得
     const { data: scrapeConfig } = await supabase
       .from('scrape_configs')
-      .select('areas')
+      .select('areas, property_types')
       .eq('enabled', true)
       .limit(1)
       .single();
     
     const targetAreas: string[] = scrapeConfig?.areas || [];
-    logInfo(`[scrape-background] Target areas: ${targetAreas.length > 0 ? targetAreas.join(', ') : 'ALL'}`);
+    results.areas_total = targetAreas.length;
+    
+    if (targetAreas.length === 0) {
+      throw new Error('スクレイプ条件が設定されていません');
+    }
+    
+    logInfo(`[scrape-background] Target areas: ${targetAreas.join(', ')}`);
 
     // 3. Connector取得
     const connector = getConnector(targetSite);
@@ -70,83 +119,185 @@ export default async function handler(request: Request) {
       throw new Error(`コネクタ「${targetSite}」が見つかりません`);
     }
 
-    logInfo(`[scrape-background] Using connector: ${connector.name}`);
-
-    // 4. 検索実行（最大100ページ）
-    const searchConfig: SearchParams = {
-      areas: targetAreas,
-      propertyTypes: [],
-      maxPages: MAX_PAGES,
-    };
-
-    logInfo(`[scrape-background] Starting search with maxPages=${MAX_PAGES}`);
-    const candidates = await connector.search(searchConfig);
-    logInfo(`[scrape-background] Found ${candidates.length} candidates`);
-
-    // 5. 詳細取得（最大2000件）
-    const candidatesToProcess = candidates.slice(0, MAX_DETAILS);
-    logInfo(`[scrape-background] Processing ${candidatesToProcess.length} items (throttle: ${DETAIL_THROTTLE_MS}ms)`);
-
-    for (const candidate of candidatesToProcess) {
-      results.processed++;
-
-      try {
-        // 既存チェック
-        const { data: existing } = await supabase
-          .from('listings')
-          .select('id')
-          .eq('url', candidate.url)
-          .maybeSingle();
-
-        if (existing) {
-          results.skipped++;
-          continue;
-        }
-
-        // 詳細取得
-        const detail = await connector.fetchDetail(candidate.url);
-        const normalized = connector.normalize(detail);
-
-        // エリアフィルタリング
-        if (targetAreas.length > 0 && normalized.property.address_raw) {
-          const address = normalized.property.address_raw;
-          const matchesArea = targetAreas.some(area => address.includes(area));
-          if (!matchesArea) {
-            results.areaFiltered++;
-            continue;
-          }
-        }
-
-        // DB保存
-        await saveListing(supabase, site.id, normalized);
-        results.inserted++;
-
-        // 進捗ログ（100件ごと）
-        if (results.processed % 100 === 0) {
-          logInfo(`[scrape-background] Progress: ${results.processed}/${candidatesToProcess.length}, inserted: ${results.inserted}`);
-        }
-
-        await throttle(DETAIL_THROTTLE_MS);
-      } catch (error) {
-        results.errors.push(String(error));
-        logError(`[scrape-background] Error: ${candidate.url}`, { error: String(error) });
-      }
+    // 4. 進捗リセット（必要に応じて）
+    if (forceReset) {
+      await supabase.from('scrape_progress').delete().eq('site_key', targetSite);
+      logInfo('[scrape-background] Progress reset');
     }
 
+    // 5. 各エリアを処理
+    for (const areaName of targetAreas) {
+      // 時間チェック
+      if (Date.now() - startTime > MAX_TIME_MS) {
+        logInfo(`[scrape-background] Time limit reached: ${Math.round((Date.now() - startTime) / 1000)}s`);
+        break;
+      }
+
+      const areaSlug = ATHOME_AREA_SLUGS[areaName];
+      if (!areaSlug) {
+        logInfo(`[scrape-background] No slug for: ${areaName}`);
+        continue;
+      }
+
+      // 進捗を取得または作成
+      let progress = await getOrCreateProgress(supabase, targetSite, areaSlug, areaName, mode);
+      
+      if (progress.status === 'completed' && mode === 'initial') {
+        results.areas_completed++;
+        logInfo(`[scrape-background] ${areaName}: already completed`);
+        continue;
+      }
+
+      results.current_area = areaName;
+      await updateProgress(supabase, progress.id, { status: 'in_progress' });
+      logInfo(`[scrape-background] Processing: ${areaName} from page ${progress.current_page}`);
+
+      // ページを処理
+      let areaCompleted = false;
+      let consecutiveSkips = 0;
+      let areaInserted = 0;
+      let areaSkipped = 0;
+
+      while (!areaCompleted) {
+        // 時間チェック
+        if (Date.now() - startTime > MAX_TIME_MS) {
+          logInfo(`[scrape-background] Time limit during ${areaName}`);
+          break;
+        }
+
+        // エリア指定検索URL
+        const searchUrl = getAthomeSearchUrl(areaName, progress.current_page);
+        if (!searchUrl) {
+          logInfo(`[scrape-background] ${areaName}: no URL for page ${progress.current_page}`);
+          break;
+        }
+
+        try {
+          // HTMLを取得
+          const html = await fetchHtml(searchUrl);
+          
+          // 物件IDを抽出
+          const pattern = /\/kodate\/(\d{10})(?:\/|\?)/g;
+          const candidates: string[] = [];
+          for (const m of html.matchAll(pattern)) {
+            const candidateUrl = `https://www.athome.co.jp/kodate/${m[1]}/`;
+            if (!candidates.includes(candidateUrl)) {
+              candidates.push(candidateUrl);
+            }
+          }
+
+          logInfo(`[scrape-background] ${areaName} page ${progress.current_page}: ${candidates.length} candidates`);
+
+          if (candidates.length === 0) {
+            areaCompleted = true;
+            await updateProgress(supabase, progress.id, {
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+              total_pages: progress.current_page - 1,
+            });
+            results.areas_completed++;
+            logInfo(`[scrape-background] ${areaName}: completed (no more candidates)`);
+            break;
+          }
+
+          // 各候補を処理
+          for (const candidateUrl of candidates) {
+            // 時間チェック
+            if (Date.now() - startTime > MAX_TIME_MS) break;
+
+            results.total_processed++;
+
+            // 既存チェック
+            const { data: existing } = await supabase
+              .from('listings')
+              .select('id')
+              .eq('url', candidateUrl)
+              .maybeSingle();
+
+            if (existing) {
+              results.total_skipped++;
+              areaSkipped++;
+              consecutiveSkips++;
+
+              if (mode === 'incremental' && consecutiveSkips >= CONSECUTIVE_SKIP_THRESHOLD) {
+                areaCompleted = true;
+                await updateProgress(supabase, progress.id, { status: 'completed' });
+                results.areas_completed++;
+                logInfo(`[scrape-background] ${areaName}: completed (consecutive skips threshold)`);
+                break;
+              }
+              continue;
+            }
+
+            consecutiveSkips = 0;
+
+            try {
+              const detail = await connector.fetchDetail(candidateUrl);
+              const normalized = connector.normalize(detail);
+              await saveListing(supabase, site.id, normalized);
+              results.total_inserted++;
+              areaInserted++;
+              await throttle(DETAIL_THROTTLE_MS);
+            } catch (detailError) {
+              results.errors.push(`${candidateUrl}: ${detailError}`);
+              logError(`[scrape-background] Detail error: ${candidateUrl}`, { error: String(detailError) });
+            }
+          }
+
+          // 次のページ
+          progress.current_page++;
+          await updateProgress(supabase, progress.id, {
+            current_page: progress.current_page,
+            processed_count: results.total_processed,
+            inserted_count: results.total_inserted,
+            skipped_count: results.total_skipped,
+            last_run_at: new Date().toISOString(),
+          });
+
+          await throttle(PAGE_THROTTLE_MS);
+
+        } catch (pageError) {
+          results.errors.push(`Page error ${areaName} p${progress.current_page}: ${pageError}`);
+          logError(`[scrape-background] Page error`, { area: areaName, page: progress.current_page, error: String(pageError) });
+          break;
+        }
+      }
+
+      logInfo(`[scrape-background] ${areaName}: inserted=${areaInserted}, skipped=${areaSkipped}`);
+    }
+
+    // 全エリア完了チェック
+    const { data: allProgress } = await supabase
+      .from('scrape_progress')
+      .select('status')
+      .eq('site_key', targetSite);
+    
+    const completedCount = allProgress?.filter(p => p.status === 'completed').length || 0;
+    const totalCount = allProgress?.length || 0;
+    results.completed = totalCount > 0 && completedCount === totalCount;
+    results.areas_completed = completedCount;
+    results.areas_total = totalCount;
+
     results.endTime = new Date().toISOString();
-    logInfo(`[scrape-background] Completed`, results);
+    results.elapsed_seconds = Math.round((Date.now() - startTime) / 1000);
+
+    logInfo(`[scrape-background] Finished`, results);
 
     return new Response(JSON.stringify({
       success: true,
-      message: `${connector.name}: ${results.inserted}件取得、${results.skipped}件スキップ、${results.areaFiltered}件エリア外`,
+      message: results.completed 
+        ? `全エリア完了: ${results.total_inserted}件取得` 
+        : `${results.total_inserted}件取得（${results.areas_completed}/${results.areas_total}エリア完了）`,
       ...results,
     }), {
-      status: 200,
+      status: 202,  // Background Functionは202を返す
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
     results.endTime = new Date().toISOString();
+    results.elapsed_seconds = Math.round((Date.now() - startTime) / 1000);
     logError('[scrape-background] Failed', { error: String(error) });
+    
     return new Response(JSON.stringify({
       success: false,
       error: String(error),
@@ -158,22 +309,87 @@ export default async function handler(request: Request) {
   }
 }
 
-/**
- * リスティングをDBに保存
- */
+async function getOrCreateProgress(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  siteKey: string,
+  areaKey: string,
+  areaName: string,
+  mode: string
+): Promise<ScrapeProgress> {
+  const { data: existing } = await supabase
+    .from('scrape_progress')
+    .select('*')
+    .eq('site_key', siteKey)
+    .eq('area_key', areaKey)
+    .maybeSingle();
+
+  if (existing) {
+    if (mode === 'incremental' && existing.status === 'completed') {
+      await supabase.from('scrape_progress').update({
+        current_page: 1,
+        processed_count: 0,
+        inserted_count: 0,
+        skipped_count: 0,
+        consecutive_skips: 0,
+        status: 'pending',
+        mode: 'incremental',
+      }).eq('id', existing.id);
+      return { ...existing, current_page: 1, status: 'pending' };
+    }
+    return existing;
+  }
+
+  const { data: newProgress, error } = await supabase
+    .from('scrape_progress')
+    .insert({
+      site_key: siteKey,
+      area_key: areaKey,
+      area_name: areaName,
+      current_page: 1,
+      mode,
+    })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return newProgress;
+}
+
+async function updateProgress(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  progressId: string,
+  updates: Partial<ScrapeProgress> & { completed_at?: string; last_run_at?: string }
+) {
+  await supabase.from('scrape_progress').update(updates).eq('id', progressId);
+}
+
 async function saveListing(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   portalSiteId: string,
   listing: NormalizedListing
 ) {
-  // 1. property を検索 or 作成
   let propertyId: string;
+  let existingProperty = null;
 
-  const { data: existingProperty } = await supabase
-    .from('properties')
-    .select('id')
-    .eq('normalized_address', listing.property.normalized_address)
-    .maybeSingle();
+  // address_rawで検索
+  if (listing.property.address_raw) {
+    const { data } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('address_raw', listing.property.address_raw)
+      .maybeSingle();
+    existingProperty = data;
+  }
+
+  // normalized_addressで検索
+  if (!existingProperty && listing.property.normalized_address && listing.property.normalized_address.length > 10) {
+    const { data } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('normalized_address', listing.property.normalized_address)
+      .maybeSingle();
+    existingProperty = data;
+  }
 
   if (existingProperty) {
     propertyId = existingProperty.id;
@@ -200,7 +416,6 @@ async function saveListing(
     propertyId = newProperty.id;
   }
 
-  // 2. listing を作成
   const { error: listingError } = await supabase
     .from('listings')
     .insert({

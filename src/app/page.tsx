@@ -111,61 +111,61 @@ export default function DashboardPage() {
     }
   }
 
-  // バッチスクレイピング（繰り返し呼び出しで全件取得）
+  // バッチスクレイピング（Background Function - 最大15分実行）
   async function scrapeBatch(siteKey: string, siteName: string) {
     setTriggering(`scrape-${siteKey}`);
-    let totalInserted = 0;
-    let totalSkipped = 0;
-    let loops = 0;
-    const maxLoops = 100; // 安全のため上限
     
     try {
-      while (loops < maxLoops) {
-        loops++;
+      // Background Functionを呼び出し（即座に202が返る）
+      const res = await fetch(`/.netlify/functions/scrape-background?site=${siteKey}&mode=initial`, { 
+        method: 'POST' 
+      });
+      
+      if (!res.ok && res.status !== 202) {
+        const text = await res.text();
+        alert(`${siteName}の開始に失敗: ${text.substring(0, 200)}`);
+        setTriggering(null);
+        return;
+      }
+      
+      alert(`${siteName}のバックグラウンド取得を開始しました。\n\n最大15分間実行されます。\n進捗は画面に自動表示されます。`);
+      
+      // 進捗をポーリングで監視（最大15分 + バッファ）
+      const maxPolls = 180; // 5秒 × 180 = 15分
+      let polls = 0;
+      let lastInserted = 0;
+      
+      while (polls < maxPolls) {
+        polls++;
+        await new Promise(r => setTimeout(r, 5000)); // 5秒待機
         
-        const res = await fetch(`/api/jobs/scrape-batch?site=${siteKey}&mode=initial`, { 
-          method: 'POST' 
-        });
+        await fetchScrapeProgress();
+        await fetchPortalStats();
         
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          const text = await res.text();
-          console.error('Non-JSON response:', text.substring(0, 500));
-          alert(`${siteName}の取得に失敗: サーバーエラー\n${text.substring(0, 200)}`);
+        // 進捗を確認
+        const progress = scrapeProgress.filter(p => p.site_key === siteKey);
+        const allCompleted = progress.length > 0 && progress.every(p => p.status === 'completed');
+        const totalInserted = progress.reduce((sum, p) => sum + p.inserted_count, 0);
+        
+        // 完了チェック
+        if (allCompleted) {
+          alert(`${siteName} 全エリア完了！\n\n取得: ${totalInserted}件`);
           break;
         }
         
-        const result = await res.json();
-        
-        if (result.error) {
-          alert(`${siteName}の取得に失敗: ${result.error}`);
+        // 進捗が5分間変わらなければ終了（スタックしている可能性）
+        if (polls % 60 === 0 && totalInserted === lastInserted) {
+          alert(`${siteName} 処理が停止している可能性があります。\n\n現在の取得: ${totalInserted}件`);
           break;
         }
-        
-        totalInserted += result.total_inserted || 0;
-        totalSkipped += result.total_skipped || 0;
-        
-        // 完了したら終了
-        if (result.completed) {
-          alert(`${siteName} 全エリア完了！\n\n取得: ${totalInserted}件\nスキップ: ${totalSkipped}件`);
-          break;
-        }
-        
-        // 進捗がなければ終了（無限ループ防止）
-        if (result.total_inserted === 0 && result.total_skipped === 0 && result.candidates_found === 0) {
-          alert(`${siteName} 処理完了\n\n取得: ${totalInserted}件\nスキップ: ${totalSkipped}件`);
-          break;
-        }
-        
-        // 短い待機
-        await new Promise(r => setTimeout(r, 500));
+        lastInserted = totalInserted;
       }
       
       await fetchAll();
     } catch (error) {
       console.error(`Failed to scrape ${siteKey}:`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
-      alert(`${siteName}の取得に失敗: ${errorMsg}\n\nこれまでの取得: ${totalInserted}件`);
+      alert(`${siteName}の取得に失敗: ${errorMsg}`);
     } finally {
       setTriggering(null);
     }
@@ -212,7 +212,8 @@ export default function DashboardPage() {
     
     setTriggering(`reset-${siteKey}`);
     try {
-      await fetch(`/api/jobs/scrape-batch?site=${siteKey}&reset=true`, { method: 'POST' });
+      // Background Functionでリセット
+      await fetch(`/.netlify/functions/scrape-background?site=${siteKey}&reset=true`, { method: 'POST' });
       alert(`${siteName}の進捗をリセットしました`);
       await fetchAll();
     } catch (error) {
@@ -343,11 +344,10 @@ export default function DashboardPage() {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
         <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
         <div className="text-sm text-blue-800">
-          <p className="font-medium">自動取得について</p>
+          <p className="font-medium">バックグラウンド取得について</p>
           <p className="mt-1">
-            毎時0分に自動でスクレイピングが実行されます（初回取得完了まで）。
-            完了後は毎週日曜0時に新着物件のみ取得します。
-            シミュレーションは毎時30分に自動実行されます。
+            「スクレイピング」ボタンを押すと、最大15分間バックグラウンドで物件を取得します。
+            進捗は自動更新されます。毎時0分に自動実行、完了後は毎週日曜0時に差分取得します。
           </p>
         </div>
       </div>

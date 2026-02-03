@@ -16,8 +16,8 @@
   directory = "netlify/functions"
 
 # Background Function - バッチスクレイピング用（最大15分）
-[functions."scrape-batch"]
-  timeout = 900  # 15分
+[functions."scrape-background"]
+  type = "background"
 
 # Scheduled Functions
 # 初回取得中: 毎時実行でコツコツ取得
