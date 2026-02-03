@@ -22,13 +22,42 @@ const CONSECUTIVE_SKIP_THRESHOLD = 30;
 const DETAIL_THROTTLE_MS = 500;
 const PAGE_THROTTLE_MS = 1000;
 
-// エリアスラッグ（アットホーム用）
+// エリアスラッグ（アットホーム用）- constants.tsと統一
 const ATHOME_AREA_SLUGS: Record<string, string> = {
-  '小樽市': 'otaru-city',
-  'ニセコ町': 'abuta-gun-niseko-town',
+  // 札幌市
   '札幌市': 'sapporo-city',
-  '倶知安町': 'abuta-gun-kutchan-town',
-  '余市町': 'yoichi-gun-yoichi-town',
+  '札幌市中央区': 'chuo-ku-sapporo-city',
+  '札幌市北区': 'kita-ku-sapporo-city',
+  '札幌市東区': 'higashi-ku-sapporo-city',
+  '札幌市白石区': 'shiroishi-ku-sapporo-city',
+  '札幌市豊平区': 'toyohira-ku-sapporo-city',
+  '札幌市南区': 'minami-ku-sapporo-city',
+  '札幌市西区': 'nishi-ku-sapporo-city',
+  '札幌市厚別区': 'atsubetsu-ku-sapporo-city',
+  '札幌市手稲区': 'teine-ku-sapporo-city',
+  '札幌市清田区': 'kiyota-ku-sapporo-city',
+  // 主要都市
+  '小樽市': 'otaru-city',
+  '旭川市': 'asahikawa-city',
+  '函館市': 'hakodate-city',
+  '釧路市': 'kushiro-city',
+  '帯広市': 'obihiro-city',
+  '北見市': 'kitami-city',
+  '苫小牧市': 'tomakomai-city',
+  '千歳市': 'chitose-city',
+  '江別市': 'ebetsu-city',
+  '室蘭市': 'muroran-city',
+  '岩見沢市': 'iwamizawa-city',
+  '恵庭市': 'eniwa-city',
+  '北広島市': 'kitahiroshima-city',
+  '石狩市': 'ishikari-city',
+  '登別市': 'noboribetsu-city',
+  // リゾート
+  'ニセコ町': 'niseko-town-abuta-county',
+  '倶知安町': 'kutchan-town-abuta-county',
+  '余市町': 'yoichi-town-yoichi-county',
+  '洞爺湖町': 'toyako-town-abuta-county',
+  '留寿都村': 'rusutsu-village-abuta-county',
 };
 
 interface ScrapeProgress {
@@ -50,10 +79,12 @@ interface ScrapeProgress {
 function getAthomeSearchUrl(areaName: string, page: number): string | null {
   const slug = ATHOME_AREA_SLUGS[areaName];
   if (!slug) return null;
+  const baseUrl = 'https://www.athome.co.jp/kodate/chuko/hokkaido';
   if (page === 1) {
-    return `https://www.athome.co.jp/kodate/chuko/hokkaido/${slug}/list/`;
+    return `${baseUrl}/${slug}/list/`;
   }
-  return `https://www.athome.co.jp/kodate/chuko/hokkaido/${slug}/list/?page=${page}`;
+  // アットホームのページネーション形式: /list/page2/, /list/page3/
+  return `${baseUrl}/${slug}/list/page${page}/`;
 }
 
 export default async function handler(request: Request) {
