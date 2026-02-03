@@ -82,8 +82,8 @@ function getAthomeSearchUrl(areaName: string, page: number): string | null {
   if (page === 1) {
     return `${baseUrl}/${slug}/list/`;
   }
-  // アットホームのページネーション形式: /list/page2/, /list/page3/
-  return `${baseUrl}/${slug}/list/page${page}/`;
+  // アットホームのページネーション形式: ?page=2, ?page=3
+  return `${baseUrl}/${slug}/list/?page=${page}`;
 }
 
 export default async function handler(request: Request) {

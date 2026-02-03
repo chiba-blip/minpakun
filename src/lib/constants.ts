@@ -259,5 +259,6 @@ export function getAthomeSearchUrl(areaName: string, page: number = 1): string |
   if (page === 1) {
     return `${baseUrl}/${slug}/list/`;
   }
-  return `${baseUrl}/${slug}/list/page${page}/`;
+  // アットホームのページネーション形式: ?page=2
+  return `${baseUrl}/${slug}/list/?page=${page}`;
 }
