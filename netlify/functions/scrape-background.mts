@@ -626,7 +626,22 @@ async function saveListing(
 
   if (existingProperty) {
     propertyId = existingProperty.id;
-    logInfo(`[saveListing] Using existing property: ${propertyId}`);
+    logInfo(`[saveListing] Using existing property: ${propertyId}, updating nearest_station: ${listing.property.nearest_station}`);
+    
+    // 既存物件のnearest_stationとwalk_minutesを更新
+    if (listing.property.nearest_station || listing.property.walk_minutes) {
+      const { error: updateError } = await supabase
+        .from('properties')
+        .update({
+          nearest_station: listing.property.nearest_station,
+          walk_minutes: listing.property.walk_minutes,
+        })
+        .eq('id', propertyId);
+      
+      if (updateError) {
+        logError(`[saveListing] Failed to update nearest_station`, { error: updateError.message });
+      }
+    }
   } else {
     logInfo(`[saveListing] Creating new property with nearest_station: ${listing.property.nearest_station}, walk_minutes: ${listing.property.walk_minutes}`);
     const { data: newProperty, error: propError } = await supabase
