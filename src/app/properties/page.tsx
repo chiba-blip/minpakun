@@ -704,7 +704,7 @@ export default function PropertiesPage() {
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <Building2 className="w-5 h-5" />
-              検索結果: {data.total}件
+              検索結果: {totalCount}件
             </CardTitle>
             <Button variant="outline" onClick={downloadCsv}>
               <Download className="w-4 h-4 mr-2" />
