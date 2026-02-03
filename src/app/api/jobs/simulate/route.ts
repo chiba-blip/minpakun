@@ -75,6 +75,11 @@ const DEFAULT_COST_CONFIG = {
   other_cost_rate: 5,
 };
 
+// Netlifyの実行時間制限対策: 1回の実行で処理する物件数を絞る
+const MAX_SIMULATIONS_PER_RUN = 3;
+// 取得する類似物件（comps）を絞る（API呼び出し回数/時間の削減）
+const MAX_COMPARABLES_FOR_METRICS = 5;
+
 // AirROI APIが使用可能かチェック
 const hasAirROIKey = !!process.env.AIRROI_API_KEY;
 
@@ -203,12 +208,17 @@ export async function POST(request: NextRequest) {
         }
 
         results.simulated++;
+
+        // タイムアウト回避: 一定件数で打ち切り、次回実行で続きを処理
+        if (results.simulated >= MAX_SIMULATIONS_PER_RUN) {
+          break;
+        }
       } catch (error) {
         results.errors.push(`エラー: ${error}`);
       }
     }
 
-    results.message = `${results.simulated}件のシミュレーションを完了しました`;
+    results.message = `${results.simulated}件のシミュレーションを完了しました（1回あたり最大${MAX_SIMULATIONS_PER_RUN}件）`;
     return NextResponse.json(results);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -499,8 +509,8 @@ async function runAirROISimulation(
   
   console.log(`[simulate] Found ${comparablesResponse.listings.length} comparable listings`);
 
-  // 4. 上位10件の listing_id で月次メトリクスを取得
-  const topComps = comparablesResponse.listings.slice(0, 10);
+  // 4. 上位N件の listing_id で月次メトリクスを取得（時間短縮）
+  const topComps = comparablesResponse.listings.slice(0, MAX_COMPARABLES_FOR_METRICS);
   const listingIds = topComps.map(c => c.listing_info.listing_id);
   
   const metricsResponses = await airroiClient.getMetricsBulk(listingIds, 12);
