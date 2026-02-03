@@ -136,19 +136,24 @@ function detectPropertyType(html: string): string | null {
 }
 
 /**
- * 最寄駅と徒歩分数を抽出
+ * 交通情報をそのまま抽出
+ * 「交通」項目のテキストをそのまま返す
  */
 function extractStationInfo(html: string): { station: string | null; walkMinutes: number | null } {
-  // まず「交通」項目からテキストを抽出（テーブル形式）
+  // 「交通」項目からテキストをそのまま抽出（テーブル形式）
   const transportPatterns = [
-    // 北海道不動産連合隊: <th>交通</th><td>JR函館本線「南小樽」駅 徒歩5分</td>
+    // <th>交通</th><td>JR函館本線「南小樽」駅 徒歩5分</td>
     /交通<\/t[hd]>\s*<t[hd][^>]*>([^<]+)</i,
     // th/td間にタグがある場合
     /交通<\/th>[\s\S]*?<td[^>]*>([^<]+)</i,
     // dt/dd形式
     /<dt[^>]*>交通<\/dt>\s*<dd[^>]*>([^<]+)</i,
-    // テキスト形式: 交通：○○
-    /交通[：:]\s*([^\n<]+)/,
+    // class="交通"やdata属性
+    /class="[^"]*交通[^"]*"[^>]*>([^<]+)</i,
+    // テキスト形式: 交通：○○ or 交通/○○
+    /交通[：:/]\s*([^\n<]+)/,
+    // アクセス情報
+    /アクセス[：:]\s*([^\n<]+)/i,
   ];
   
   let transportText = '';
@@ -156,81 +161,22 @@ function extractStationInfo(html: string): { station: string | null; walkMinutes
     const m = html.match(p);
     if (m && m[1]) {
       transportText = m[1].trim();
-      break;
+      // HTMLエンティティをデコード
+      transportText = transportText
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (transportText) break;
     }
   }
   
-  // 交通テキストから駅名と徒歩分数を抽出
+  // 交通テキストがあればそのまま返す
   if (transportText) {
-    // JR函館本線「南小樽」駅 徒歩5分 のようなパターン
-    const stationPatterns = [
-      // 「駅名」駅 徒歩X分
-      /「([^」]+)」駅?\s*徒歩\s*(\d+)\s*分/,
-      // 駅名駅 徒歩X分
-      /([^\s「」]+駅)\s*徒歩\s*(\d+)\s*分/,
-      // ○○線 駅名 徒歩X分
-      /[^\s]+線\s*「?([^」\s]+)」?駅?\s*徒歩\s*(\d+)\s*分/,
-      // バス停 徒歩X分（バスの場合）
-      /「([^」]+)」\s*(?:バス停|停留所)?\s*徒歩\s*(\d+)\s*分/,
-    ];
-    
-    for (const p of stationPatterns) {
-      const m = transportText.match(p);
-      if (m) {
-        let station = m[1]?.trim();
-        if (station && !station.endsWith('駅')) {
-          station += '駅';
-        }
-        const walkMinutes = m[2] ? parseInt(m[2], 10) : null;
-        if (station) {
-          return { station, walkMinutes };
-        }
-      }
-    }
-    
-    // 徒歩分数のみの場合
+    // 徒歩分数だけ別途抽出
     const walkMatch = transportText.match(/徒歩\s*(\d+)\s*分/);
-    if (walkMatch) {
-      // 駅名を抽出（徒歩の前の部分）
-      const stationMatch = transportText.match(/「([^」]+)」/);
-      let station = stationMatch ? stationMatch[1] + '駅' : null;
-      return { station, walkMinutes: parseInt(walkMatch[1], 10) };
-    }
-    
-    // 交通テキストをそのまま駅名として使用（徒歩分数なし）
-    if (transportText.length < 50) {
-      return { station: transportText, walkMinutes: null };
-    }
-  }
-  
-  // フォールバック: HTML全体から抽出
-  const fallbackPatterns = [
-    // 「○○駅」徒歩X分
-    /([^\s<>「」]+駅)[^<>]*?徒歩\s*(\d+)\s*分/,
-    // ○○駅 徒歩X分
-    /([^\s<>]+駅)\s*徒歩\s*(\d+)\s*分/,
-    // 地下鉄○○線「○○」駅
-    /地下鉄[^\s<>]+線[「『]?([^」』<>]+)[」』]?駅[^<>]*?徒歩\s*(\d+)\s*分/,
-  ];
-  
-  for (const p of fallbackPatterns) {
-    const m = html.match(p);
-    if (m) {
-      let station = m[1]?.trim();
-      if (station && !station.endsWith('駅')) {
-        station += '駅';
-      }
-      const walkMinutes = m[2] ? parseInt(m[2], 10) : null;
-      if (station) {
-        return { station, walkMinutes };
-      }
-    }
-  }
-  
-  // 徒歩分数のみ取得できる場合
-  const walkOnlyMatch = html.match(/徒歩\s*(\d+)\s*分/);
-  if (walkOnlyMatch) {
-    return { station: null, walkMinutes: parseInt(walkOnlyMatch[1], 10) };
+    const walkMinutes = walkMatch ? parseInt(walkMatch[1], 10) : null;
+    return { station: transportText, walkMinutes };
   }
   
   return { station: null, walkMinutes: null };
