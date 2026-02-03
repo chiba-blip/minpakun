@@ -369,44 +369,70 @@ export default function PropertyDetailPage() {
                       const dataSource = sim.assumptions?.data_source as string | undefined;
                       const bedrooms = sim.assumptions?.bedrooms as number | undefined;
                       const comparablesCount = sim.assumptions?.comparables_count as number | undefined;
-                      const adjustmentMultiplier = sim.assumptions?.revenue_adjustment_multiplier as number | undefined;
-                      const adjustmentReasons = sim.assumptions?.revenue_adjustment_reasons as string[] | undefined;
+                      interface ComparableInfo {
+                        listing_id: number;
+                        listing_name: string;
+                        bedrooms: number;
+                        guests: number;
+                        baths: number;
+                        ttm_revenue: number;
+                        ttm_avg_rate: number;
+                        ttm_occupancy: number;
+                      }
+                      const comparables = sim.assumptions?.comparables as ComparableInfo[] | undefined;
                       return (
-                        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
-                          <div className="flex flex-wrap items-center gap-4">
-                            <div>
-                              <span className="text-gray-500">データソース: </span>
-                              <Badge variant={dataSource === 'airroi' ? 'default' : 'secondary'}>
-                                {dataSource === 'airroi' ? 'AirROI API' : 
-                                 dataSource === 'airdna' ? 'AirDNA API' : 'ヒューリスティクス（簡易計算）'}
-                              </Badge>
+                        <>
+                          <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                            <div className="flex flex-wrap items-center gap-4">
+                              <div>
+                                <span className="text-gray-500">データソース: </span>
+                                <Badge variant={dataSource === 'airroi' ? 'default' : 'secondary'}>
+                                  {dataSource === 'airroi' ? 'AirROI API' : 
+                                   dataSource === 'airdna' ? 'AirDNA API' : 'ヒューリスティクス（簡易計算）'}
+                                </Badge>
+                              </div>
+                              {bedrooms && (
+                                <div>
+                                  <span className="text-gray-500">推定bedrooms: </span>
+                                  <span className="font-medium">{bedrooms}</span>
+                                </div>
+                              )}
+                              {comparablesCount && (
+                                <div>
+                                  <span className="text-gray-500">類似物件数: </span>
+                                  <span className="font-medium">{comparablesCount}件</span>
+                                </div>
+                              )}
                             </div>
-                            {bedrooms && (
-                              <div>
-                                <span className="text-gray-500">推定bedrooms: </span>
-                                <span className="font-medium">{bedrooms}</span>
-                              </div>
-                            )}
-                            {comparablesCount && (
-                              <div>
-                                <span className="text-gray-500">類似物件数: </span>
-                                <span className="font-medium">{comparablesCount}件</span>
-                              </div>
-                            )}
-                            {typeof adjustmentMultiplier === 'number' && (
-                              <div>
-                                <span className="text-gray-500">補正倍率: </span>
-                                <span className="font-medium">{adjustmentMultiplier.toFixed(3)}倍</span>
-                              </div>
-                            )}
                           </div>
-                          {Array.isArray(adjustmentReasons) && adjustmentReasons.length > 0 && (
-                            <div className="mt-2 text-xs text-gray-600">
-                              <span className="text-gray-500">補正理由: </span>
-                              {adjustmentReasons.join(' / ')}
+                          
+                          {/* 類似物件詳細 */}
+                          {Array.isArray(comparables) && comparables.length > 0 && (
+                            <div className="mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                              <div className="font-medium text-amber-800 mb-3">参照した類似民泊物件（AirROI）</div>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {comparables.map((comp, idx) => (
+                                  <div key={comp.listing_id} className="p-3 bg-white rounded border border-amber-100">
+                                    <div className="text-xs text-amber-600 mb-1">類似物件 {idx + 1}</div>
+                                    <div className="font-medium text-sm text-gray-800 truncate mb-2" title={comp.listing_name}>
+                                      {comp.listing_name || `ID: ${comp.listing_id}`}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1 text-xs text-gray-600">
+                                      <div>寝室: {comp.bedrooms}</div>
+                                      <div>定員: {comp.guests}人</div>
+                                      <div>年間売上: {Math.round(comp.ttm_revenue / 10000).toLocaleString()}万円</div>
+                                      <div>稼働率: {Math.round(comp.ttm_occupancy * 100)}%</div>
+                                      <div className="col-span-2">平均単価: {Math.round(comp.ttm_avg_rate).toLocaleString()}円/泊</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-2 text-xs text-amber-700">
+                                ※ これらの類似物件の実績データを基に売上を推計しています
+                              </div>
                             </div>
                           )}
-                        </div>
+                        </>
                       );
                     })()}
 

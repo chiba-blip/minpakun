@@ -10,23 +10,14 @@ import {
 } from '@/lib/airroi';
 
 // ---------------------------------------------------------------------------
-// 物件特性による補正（簡易）
+// 物件特性による補正（現在は無効化）
 // ---------------------------------------------------------------------------
-const LARGE_AREA_THRESHOLD_M2 = 80; // 「面積が大きい」判定（1戸あたり）
-const LARGE_AREA_MULTIPLIER = 1.05; // +5%
-
-function calculatePropertyRevenueAdjustment(params: {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function calculatePropertyRevenueAdjustment(_params: {
   areaPerUnit: number;
 }): { multiplier: number; reasons: string[] } {
-  const reasons: string[] = [];
-  let multiplier = 1;
-
-  // 面積が大きい → +5%
-  if (Number.isFinite(params.areaPerUnit) && params.areaPerUnit >= LARGE_AREA_THRESHOLD_M2) {
-    multiplier *= LARGE_AREA_MULTIPLIER;
-    reasons.push(`面積が大きい(+5%): ${Math.round(params.areaPerUnit)}㎡/戸`);
-  }
-  return { multiplier, reasons };
+  // 面積補正は削除（類似物件データで十分に反映されるため）
+  return { multiplier: 1, reasons: [] };
 }
 
 /**
@@ -559,6 +550,16 @@ async function runAirROISimulation(
         units,
         area_per_unit: areaPerUnit,
         comparables_count: topComps.length,
+        comparables: topComps.map(c => ({
+          listing_id: c.listing_info.listing_id,
+          listing_name: c.listing_info.listing_name,
+          bedrooms: c.property_details.bedrooms,
+          guests: c.property_details.guests,
+          baths: c.property_details.baths,
+          ttm_revenue: c.performance_metrics.ttm_revenue,
+          ttm_avg_rate: c.performance_metrics.ttm_avg_rate,
+          ttm_occupancy: c.performance_metrics.ttm_occupancy,
+        })),
         data_source: 'airroi',
         scenario_adjustment: adjustment,
         avg_stay: avgStay,
