@@ -307,11 +307,17 @@ export default function DashboardPage() {
   async function cancelSimulation() {
     if (!confirm('シミュレーションを中止しますか？')) return;
     
+    setTriggering('cancel-sim');
     try {
       await fetch('/api/simulation-progress/cancel', { method: 'POST' });
       await fetchSimProgress();
+      await fetchStats();
+      alert('シミュレーションを中止しました');
     } catch (error) {
       console.error('Failed to cancel simulation:', error);
+      alert('中止に失敗しました');
+    } finally {
+      setTriggering(null);
     }
   }
 
@@ -526,16 +532,19 @@ export default function DashboardPage() {
               バックグラウンドシミュレーション（最大15分）
             </Button>
             
-            {simProgress?.status === 'in_progress' && (
-              <Button
-                onClick={cancelSimulation}
-                variant="destructive"
-                size="sm"
-              >
+            <Button
+              onClick={cancelSimulation}
+              variant="destructive"
+              size="sm"
+              disabled={simProgress?.status !== 'in_progress' && triggering !== 'simulate' && triggering !== 'simulate-all'}
+            >
+              {triggering === 'cancel-sim' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
                 <StopCircle className="w-4 h-4 mr-2" />
-                中止
-              </Button>
-            )}
+              )}
+              シミュレーション中止
+            </Button>
 
             <Button
               onClick={runSimulation}
