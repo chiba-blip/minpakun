@@ -56,6 +56,8 @@ interface PropertyItem {
   city: string | null;
   building_area: number | null;
   property_type: string | null;
+  nearest_station: string | null;
+  walk_minutes: number | null;
   annual_revenue: number;
   annual_revenue_man: number;
   annual_profit: number;      // 利益（売上-コスト）
@@ -744,6 +746,7 @@ export default function PropertiesPage() {
                   </TableHead>
                   <TableHead className="text-right">リノベ予算</TableHead>
                   <TableHead>所在地</TableHead>
+                  <TableHead>最寄駅</TableHead>
                   <TableHead>面積</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
@@ -796,6 +799,14 @@ export default function PropertiesPage() {
                     </TableCell>
                     <TableCell className="max-w-xs truncate">
                       {item.address || '-'}
+                    </TableCell>
+                    <TableCell>
+                      {item.nearest_station ? (
+                        <span>
+                          {item.nearest_station}
+                          {item.walk_minutes && <span className="text-gray-500 ml-1">徒歩{item.walk_minutes}分</span>}
+                        </span>
+                      ) : '-'}
                     </TableCell>
                     <TableCell>
                       {item.building_area ? `${item.building_area}㎡` : '-'}

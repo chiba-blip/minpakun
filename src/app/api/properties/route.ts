@@ -17,6 +17,8 @@ interface PropertyItem {
   built_year: number | null;
   rooms: number | null;
   property_type: string | null;
+  nearest_station: string | null;
+  walk_minutes: number | null;
   annual_revenue: number;
   annual_revenue_man: number;
   annual_profit: number;
@@ -68,7 +70,9 @@ export async function GET(request: NextRequest) {
           land_area,
           built_year,
           rooms,
-          property_type
+          property_type,
+          nearest_station,
+          walk_minutes
         ),
         simulations!simulations_listing_id_fkey (
           id,
@@ -146,6 +150,8 @@ export async function GET(request: NextRequest) {
           built_year: property?.built_year || null,
           rooms: property?.rooms || null,
           property_type: property?.property_type || null,
+          nearest_station: property?.nearest_station || null,
+          walk_minutes: property?.walk_minutes || null,
           annual_revenue: annualRevenue,
           annual_revenue_man: Math.round(annualRevenue / 10000),
           annual_profit: annualProfit,
