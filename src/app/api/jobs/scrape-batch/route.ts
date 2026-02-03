@@ -3,13 +3,11 @@ import { createSupabaseServer } from '@/lib/supabaseServer';
 import { getConnector } from '@/lib/scraper/connectors';
 import type { NormalizedListing } from '@/lib/scraper/types';
 import { throttle } from '@/lib/scraper/http';
-import { getAthomeSearchUrl, ATHOME_AREA_SLUGS } from '@/lib/constants';
 
 // 設定
-const ITEMS_PER_PAGE = 30;           // アットホームの1ページあたり件数（推定）
-const MAX_ITEMS_PER_RUN = 200;       // 1回の実行で処理する最大件数
-const MAX_TIME_MS = 14 * 60 * 1000;  // 14分（15分タイムアウト前に終了）
-const CONSECUTIVE_SKIP_THRESHOLD = 10; // 差分モード: 連続スキップでこの数に達したら終了
+const MAX_ITEMS_PER_RUN = 50;        // 1回の実行で処理する最大件数（詳細取得が重いので少なめ）
+const MAX_TIME_MS = 13 * 60 * 1000;  // 13分（15分タイムアウト前に終了）
+const CONSECUTIVE_SKIP_THRESHOLD = 30; // 差分モード: 連続スキップでこの数に達したら終了
 
 interface ScrapeProgress {
   id: string;
@@ -29,9 +27,9 @@ interface ScrapeProgress {
 
 /**
  * バッチスクレイプジョブ
- * - 進捗管理付き
- * - エリア指定検索URL
- * - 差分モード対応（既存連続スキップで終了）
+ * - 北海道全体URLからページネーションで取得
+ * - 住所でエリアフィルタリング
+ * - 進捗管理付き（ページ単位）
  */
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServer();
@@ -40,23 +38,25 @@ export async function POST(request: NextRequest) {
   
   // パラメータ
   const targetSite = searchParams.get('site') || 'athome';
-  const forceReset = searchParams.get('reset') === 'true'; // 進捗リセット
+  const forceReset = searchParams.get('reset') === 'true';
   const mode = (searchParams.get('mode') || 'initial') as 'initial' | 'incremental';
 
   const results = {
     site: targetSite,
-    areas_processed: [] as string[],
+    mode,
+    current_page: 0,
+    candidates_found: 0,
     total_processed: 0,
     total_inserted: 0,
     total_skipped: 0,
+    area_filtered: 0,
     errors: [] as string[],
-    debug: [] as string[],  // デバッグ情報
     message: '',
     completed: false,
   };
 
   try {
-    // 1. スクレイプ条件を取得
+    // 1. スクレイプ条件を取得（エリアフィルタ用）
     const { data: scrapeConfig } = await supabase
       .from('scrape_configs')
       .select('areas, property_types')
@@ -64,13 +64,13 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .single();
 
-    if (!scrapeConfig?.areas || scrapeConfig.areas.length === 0) {
+    const targetAreas: string[] = scrapeConfig?.areas || [];
+    console.log(`[scrape-batch] Target areas: ${targetAreas.length > 0 ? targetAreas.join(', ') : 'ALL'}`);
+
+    if (targetAreas.length === 0) {
       results.message = 'スクレイプ条件が設定されていません。設定画面でエリアを指定してください。';
       return NextResponse.json(results);
     }
-
-    const targetAreas: string[] = scrapeConfig.areas;
-    console.log(`[scrape-batch] Target areas: ${targetAreas.join(', ')}`);
 
     // 2. ポータルサイト確認
     const { data: site, error: siteError } = await supabase
@@ -91,188 +91,154 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(results);
     }
 
-    // 4. 進捗リセット（指定時）
-    if (forceReset) {
-      await supabase
-        .from('scrape_progress')
-        .delete()
-        .eq('site_key', targetSite);
-      console.log(`[scrape-batch] Progress reset for ${targetSite}`);
+    // 4. 進捗を取得または作成（サイト全体で1レコード）
+    let progress = await getOrCreateProgress(supabase, targetSite, mode, forceReset);
+    results.current_page = progress.current_page;
+
+    // 完了済みの場合はスキップ（差分モードでは毎回リセット）
+    if (progress.status === 'completed' && mode === 'initial') {
+      results.message = '全ページのスクレイプが完了しています。進捗リセットで最初から取得できます。';
+      results.completed = true;
+      return NextResponse.json(results);
     }
 
-    // 5. 各エリアを順番に処理
-    let totalItemsProcessed = 0;
+    // 進捗を処理中に更新
+    await updateProgress(supabase, progress.id, {
+      status: 'in_progress',
+      started_at: progress.status !== 'in_progress' ? new Date().toISOString() : undefined,
+    });
 
-    for (const areaName of targetAreas) {
+    // 5. ページを順次処理
+    let itemsProcessed = 0;
+    let consecutiveSkips = 0;
+
+    while (itemsProcessed < MAX_ITEMS_PER_RUN) {
       // 時間チェック
       if (Date.now() - startTime > MAX_TIME_MS) {
-        console.log(`[scrape-batch] Time limit reached`);
+        console.log(`[scrape-batch] Time limit reached at page ${progress.current_page}`);
         break;
       }
 
-      // アイテム数チェック
-      if (totalItemsProcessed >= MAX_ITEMS_PER_RUN) {
-        console.log(`[scrape-batch] Item limit reached`);
+      // 差分モード: 連続スキップで終了
+      if (mode === 'incremental' && consecutiveSkips >= CONSECUTIVE_SKIP_THRESHOLD) {
+        console.log(`[scrape-batch] Consecutive skips threshold reached`);
+        await updateProgress(supabase, progress.id, {
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        });
+        results.completed = true;
         break;
       }
 
-      // エリアのURLスラッグを取得
-      const areaSlug = ATHOME_AREA_SLUGS[areaName];
-      if (!areaSlug) {
-        console.log(`[scrape-batch] No slug for area: ${areaName}`);
-        continue;
-      }
+      // ページから候補を取得（コネクターのsearchを1ページ分だけ呼ぶ）
+      const pageUrl = getPageUrl(targetSite, progress.current_page);
+      console.log(`[scrape-batch] Fetching page ${progress.current_page}: ${pageUrl}`);
 
-      // 進捗を取得または作成
-      let progress = await getOrCreateProgress(supabase, targetSite, areaSlug, areaName, mode);
-      
-      // 完了済みエリアはスキップ（差分モードでは毎回リセット）
-      if (progress.status === 'completed' && mode === 'initial') {
-        console.log(`[scrape-batch] Area already completed: ${areaName}`);
-        continue;
-      }
+      try {
+        const candidates = await connector.search({
+          areas: [],
+          propertyTypes: [],
+          maxPages: 1,
+          customUrl: pageUrl,
+        });
 
-      // 進捗を処理中に更新
-      await updateProgress(supabase, progress.id, {
-        status: 'in_progress',
-        started_at: progress.status !== 'in_progress' ? new Date().toISOString() : undefined,
-      });
+        results.candidates_found += candidates.length;
+        console.log(`[scrape-batch] Page ${progress.current_page}: ${candidates.length} candidates`);
 
-      console.log(`[scrape-batch] Processing area: ${areaName} (page ${progress.current_page})`);
-
-      // ページを順次処理
-      let areaCompleted = false;
-      while (!areaCompleted) {
-        // 制限チェック
-        if (Date.now() - startTime > MAX_TIME_MS || totalItemsProcessed >= MAX_ITEMS_PER_RUN) {
+        if (candidates.length === 0) {
+          // 最終ページ到達
+          console.log(`[scrape-batch] No more candidates, scraping completed`);
+          await updateProgress(supabase, progress.id, {
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            total_pages: progress.current_page - 1,
+          });
+          results.completed = true;
           break;
         }
 
-        const searchUrl = getAthomeSearchUrl(areaName, progress.current_page);
-        if (!searchUrl) break;
-
-        try {
-          console.log(`[scrape-batch] Fetching: ${searchUrl}`);
-          results.debug.push(`Fetching: ${searchUrl}`);
-          
-          const candidates = await connector.search({ 
-            areas: [areaName], 
-            propertyTypes: [], 
-            maxPages: 1,
-            customUrl: searchUrl,
-          });
-
-          results.debug.push(`${areaName} page ${progress.current_page}: ${candidates.length} candidates found`);
-          console.log(`[scrape-batch] ${areaName} page ${progress.current_page}: ${candidates.length} candidates`);
-
-          if (candidates.length === 0) {
-            // ページに物件がない = 最終ページ到達
-            areaCompleted = true;
-            await updateProgress(supabase, progress.id, {
-              status: 'completed',
-              completed_at: new Date().toISOString(),
-              total_pages: progress.current_page - 1,
-            });
-            results.debug.push(`${areaName}: completed (no more candidates)`);
-            console.log(`[scrape-batch] Area completed: ${areaName}`);
+        // 各候補を処理
+        for (const candidate of candidates) {
+          if (itemsProcessed >= MAX_ITEMS_PER_RUN || Date.now() - startTime > MAX_TIME_MS) {
             break;
           }
 
-          // 各物件を処理
-          for (const candidate of candidates) {
-            if (Date.now() - startTime > MAX_TIME_MS || totalItemsProcessed >= MAX_ITEMS_PER_RUN) {
-              break;
-            }
+          // 既存チェック
+          const { data: existing } = await supabase
+            .from('listings')
+            .select('id')
+            .eq('url', candidate.url)
+            .maybeSingle();
 
-            totalItemsProcessed++;
-            progress.processed_count++;
+          if (existing) {
+            results.total_skipped++;
+            consecutiveSkips++;
+            continue;
+          }
 
-            // 既存チェック
-            const { data: existing } = await supabase
-              .from('listings')
-              .select('id')
-              .eq('url', candidate.url)
-              .maybeSingle();
+          // 新規物件 → 連続スキップをリセット
+          consecutiveSkips = 0;
+          itemsProcessed++;
+          results.total_processed++;
 
-            if (existing) {
-              progress.skipped_count++;
-              progress.consecutive_skips++;
+          try {
+            // 詳細取得
+            const detail = await connector.fetchDetail(candidate.url);
+            const normalized = connector.normalize(detail);
 
-              // 差分モード: 連続スキップで終了
-              if (mode === 'incremental' && progress.consecutive_skips >= CONSECUTIVE_SKIP_THRESHOLD) {
-                console.log(`[scrape-batch] Consecutive skips threshold reached for ${areaName}`);
-                areaCompleted = true;
-                await updateProgress(supabase, progress.id, {
-                  status: 'completed',
-                  completed_at: new Date().toISOString(),
-                  consecutive_skips: progress.consecutive_skips,
-                  skipped_count: progress.skipped_count,
-                });
-                break;
-              }
+            // エリアフィルタリング
+            const address = normalized.property.address_raw;
+            if (!address) {
+              results.area_filtered++;
+              console.log(`[scrape-batch] Filtered (no address): ${candidate.url}`);
               continue;
             }
 
-            // 新規物件 → 連続スキップをリセット
-            progress.consecutive_skips = 0;
-
-            try {
-              // 詳細取得
-              const detail = await connector.fetchDetail(candidate.url);
-              const normalized = connector.normalize(detail);
-
-              // 保存
-              await saveListing(supabase, site.id, normalized);
-              progress.inserted_count++;
-              results.total_inserted++;
-              console.log(`[scrape-batch] Inserted: ${normalized.title?.substring(0, 30)}...`);
-
-              await throttle(300);
-            } catch (detailError) {
-              console.error(`[scrape-batch] Detail error: ${candidate.url}`, detailError);
-              results.errors.push(`${candidate.url}: ${detailError}`);
+            const matchesArea = targetAreas.some(area => address.includes(area));
+            if (!matchesArea) {
+              results.area_filtered++;
+              console.log(`[scrape-batch] Filtered (area mismatch): ${address}`);
+              continue;
             }
+
+            // 保存
+            await saveListing(supabase, site.id, normalized);
+            results.total_inserted++;
+            console.log(`[scrape-batch] Inserted: ${normalized.title?.substring(0, 30)}...`);
+
+            await throttle(500);
+          } catch (detailError) {
+            console.error(`[scrape-batch] Detail error: ${candidate.url}`, detailError);
+            results.errors.push(`${candidate.url}: ${detailError}`);
           }
-
-          // ページ進捗を保存
-          progress.current_page++;
-          await updateProgress(supabase, progress.id, {
-            current_page: progress.current_page,
-            processed_count: progress.processed_count,
-            inserted_count: progress.inserted_count,
-            skipped_count: progress.skipped_count,
-            consecutive_skips: progress.consecutive_skips,
-            last_run_at: new Date().toISOString(),
-          });
-
-        } catch (pageError) {
-          console.error(`[scrape-batch] Page error: ${searchUrl}`, pageError);
-          results.errors.push(`${searchUrl}: ${pageError}`);
-          await updateProgress(supabase, progress.id, {
-            status: 'error',
-            error_message: String(pageError),
-          });
-          break;
         }
-      }
 
-      results.areas_processed.push(areaName);
-      results.total_processed += progress.processed_count;
-      results.total_skipped += progress.skipped_count;
+        // 次のページへ
+        progress.current_page++;
+        await updateProgress(supabase, progress.id, {
+          current_page: progress.current_page,
+          processed_count: results.total_processed,
+          inserted_count: results.total_inserted,
+          skipped_count: results.total_skipped,
+          last_run_at: new Date().toISOString(),
+        });
+
+      } catch (pageError) {
+        console.error(`[scrape-batch] Page error:`, pageError);
+        results.errors.push(`Page ${progress.current_page}: ${pageError}`);
+        // エラーでも次のページへ進む
+        progress.current_page++;
+        await updateProgress(supabase, progress.id, {
+          current_page: progress.current_page,
+          error_message: String(pageError),
+        });
+      }
     }
 
-    // 全エリア完了チェック
-    const { data: allProgress } = await supabase
-      .from('scrape_progress')
-      .select('status')
-      .eq('site_key', targetSite);
-    
-    const allCompleted = allProgress?.every(p => p.status === 'completed') ?? false;
-    results.completed = allCompleted;
-
-    results.message = allCompleted
-      ? `全エリアのスクレイプが完了しました（${results.total_inserted}件取得）`
-      : `${results.areas_processed.length}エリア処理、${results.total_inserted}件取得（継続中）`;
+    results.current_page = progress.current_page;
+    results.message = results.completed
+      ? `スクレイプ完了: ${results.total_inserted}件取得`
+      : `${results.total_inserted}件取得（ページ${progress.current_page}まで処理、続きあり）`;
 
     return NextResponse.json(results);
 
@@ -284,14 +250,6 @@ export async function POST(request: NextRequest) {
         ? JSON.stringify(error) 
         : String(error);
     
-    // テーブルが存在しない場合の特別なメッセージ
-    if (errorMessage.includes('does not exist') || errorMessage.includes('42P01')) {
-      return NextResponse.json(
-        { ...results, error: 'scrape_progressテーブルが存在しません。Supabaseでマイグレーションを実行してください。' },
-        { status: 500 }
-      );
-    }
-    
     return NextResponse.json(
       { ...results, error: errorMessage },
       { status: 500 }
@@ -299,20 +257,38 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// ページURLを生成
+function getPageUrl(siteKey: string, page: number): string {
+  if (siteKey === 'athome') {
+    const baseUrl = 'https://www.athome.co.jp/kodate/chuko/hokkaido';
+    return page === 1 ? `${baseUrl}/list/` : `${baseUrl}/list/page${page}/`;
+  }
+  // 他のサイトは後で追加
+  return '';
+}
+
 // 進捗を取得または作成
 async function getOrCreateProgress(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   siteKey: string,
-  areaKey: string,
-  areaName: string,
-  mode: string
+  mode: string,
+  forceReset: boolean
 ): Promise<ScrapeProgress> {
+  // リセット
+  if (forceReset) {
+    await supabase
+      .from('scrape_progress')
+      .delete()
+      .eq('site_key', siteKey);
+    console.log(`[scrape-batch] Progress reset for ${siteKey}`);
+  }
+
   const { data: existing } = await supabase
     .from('scrape_progress')
     .select('*')
     .eq('site_key', siteKey)
-    .eq('area_key', areaKey)
+    .eq('area_key', 'all')  // サイト全体で1レコード
     .single();
 
   if (existing) {
@@ -351,8 +327,8 @@ async function getOrCreateProgress(
     .from('scrape_progress')
     .insert({
       site_key: siteKey,
-      area_key: areaKey,
-      area_name: areaName,
+      area_key: 'all',
+      area_name: '北海道全域',
       current_page: 1,
       mode,
     })

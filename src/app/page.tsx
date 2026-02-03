@@ -135,9 +135,13 @@ export default function DashboardPage() {
           : String(result.error);
         alert(`${siteName}の取得に失敗: ${errorMsg}`);
       } else {
-        const status = result.completed ? '（全エリア完了）' : '（継続中、再度クリックで続きを取得）';
-        const debugInfo = result.debug?.length > 0 ? `\n\nデバッグ:\n${result.debug.slice(0, 10).join('\n')}` : '';
-        alert(`${siteName}: ${result.total_inserted || 0}件取得、${result.total_skipped || 0}件スキップ ${status}\n処理エリア: ${result.areas_processed?.join(', ') || 'なし'}${debugInfo}`);
+        const status = result.completed ? '（完了）' : '（継続中）';
+        alert(`${siteName} ${status}
+取得: ${result.total_inserted || 0}件
+スキップ: ${result.total_skipped || 0}件
+エリア外: ${result.area_filtered || 0}件
+現在ページ: ${result.current_page || 0}
+候補数: ${result.candidates_found || 0}件`);
       }
       
       await fetchAll();
