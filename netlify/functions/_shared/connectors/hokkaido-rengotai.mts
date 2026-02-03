@@ -278,22 +278,46 @@ export class HokkaidoRengotaiConnector implements Connector {
 
   private extractAddress(html: string): string | null {
     // 連合隊詳細ページのパターン
-    const patterns = [
-      /<td class="address">[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
-      /"ADDRESS":"([^"]+)"/,
-      /北海道[^\s<"]+[市町村区][^\s<"]*/,
-    ];
-    
-    for (const pattern of patterns) {
-      const match = html.match(pattern);
-      if (match) {
-        const address = match[1]?.trim() || match[0]?.trim();
-        // JSONエスケープを解除
-        return address.replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => 
-          String.fromCharCode(parseInt(code, 16))
-        );
+    // 1. <a class="icoMarker">北海道小樽市祝津3-100</a>
+    const icoMarkerMatch = html.match(/<a[^>]*class="icoMarker"[^>]*>([^<]+)<\/a>/i);
+    if (icoMarkerMatch && icoMarkerMatch[1]) {
+      const address = icoMarkerMatch[1].trim();
+      if (address.includes('北海道') || address.match(/[市町村区]/)) {
+        return address;
       }
     }
+
+    // 2. "ADDRESS":"..." in JavaScript (Unicode escaped)
+    const jsonMatch = html.match(/"ADDRESS":"([^"]+)"/);
+    if (jsonMatch && jsonMatch[1]) {
+      const address = jsonMatch[1].replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => 
+        String.fromCharCode(parseInt(code, 16))
+      );
+      if (address.length > 5) {
+        return address;
+      }
+    }
+
+    // 3. タイトルから住所を抽出 (小樽市祝津3丁目100番)
+    const titleMatch = html.match(/<title>売買物件詳細\s*\(([^)]+)\)/i);
+    if (titleMatch && titleMatch[1]) {
+      const titleParts = titleMatch[1].split(/\s+/);
+      if (titleParts[0] && titleParts[0].match(/[市町村区]/)) {
+        return '北海道' + titleParts[0];
+      }
+    }
+
+    // 4. h1タグから住所部分を抽出
+    const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+    if (h1Match && h1Match[1]) {
+      const h1Text = h1Match[1].trim();
+      // 「小樽市〇〇」のような形式を探す
+      const cityMatch = h1Text.match(/([^\s]+[市町村区][^\s]*)/);
+      if (cityMatch) {
+        return '北海道' + cityMatch[1];
+      }
+    }
+
     return null;
   }
 

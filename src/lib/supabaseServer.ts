@@ -16,4 +16,3 @@ export async function createSupabaseServer() {
 
 // 互換性のためのエイリアス
 export const createServerClient = createSupabaseServer;
-

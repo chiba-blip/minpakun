@@ -581,25 +581,19 @@ async function saveListing(
 
   logInfo(`[saveListing] Starting: ${listing.url}`);
 
-  // address_rawで検索
-  if (listing.property.address_raw) {
+  // 住所が十分に具体的な場合のみ既存propertyを検索
+  // 「北海道」だけや短い住所では検索しない
+  const hasSpecificAddress = listing.property.address_raw && 
+    listing.property.address_raw.length > 15 &&
+    /\d/.test(listing.property.address_raw); // 番地が含まれている
+
+  if (hasSpecificAddress) {
     const { data, error } = await supabase
       .from('properties')
       .select('id')
       .eq('address_raw', listing.property.address_raw)
       .maybeSingle();
     if (error) logError(`[saveListing] Error searching by address_raw`, { error: error.message });
-    existingProperty = data;
-  }
-
-  // normalized_addressで検索
-  if (!existingProperty && listing.property.normalized_address && listing.property.normalized_address.length > 10) {
-    const { data, error } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('normalized_address', listing.property.normalized_address)
-      .maybeSingle();
-    if (error) logError(`[saveListing] Error searching by normalized_address`, { error: error.message });
     existingProperty = data;
   }
 
